@@ -1638,13 +1638,13 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
         {/* Menu Toggle Button */}
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="absolute top-2 left-2 z-10 p-2 bg-teal-600 text-white rounded-lg shadow-lg hover:bg-teal-700"
+          className="absolute top-1 left-1 z-10 p-2 bg-teal-600 text-white rounded-lg shadow-lg hover:bg-teal-700"
         >
           {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
 
-        {/* Canvas */}
-        <div className="flex-1 p-2 pt-14 pb-12">
+        {/* Canvas - adjusted padding to not overlap with scrollbar */}
+        <div className="absolute top-0 left-0 right-0 bottom-10 p-1 pt-12">
           <canvas
             ref={canvasRef}
             onClick={handleCanvasClick}
@@ -1657,7 +1657,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
         </div>
 
         {/* Bottom Scrollbar */}
-        <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2">
+        <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-2 py-1">
           <div className="flex items-center space-x-2">
             <input
               type="range"
