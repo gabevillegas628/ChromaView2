@@ -232,5 +232,95 @@
     "site": "CGTCTC",
     "cut": 1,
     "type": "Type IIS"
+  },
+  {
+    "name": "SfiI",
+    "site": "GGCCNNNNNGGCC",
+    "cut": 8,
+    "type": "Type II"
+  },
+  {
+    "name": "HinfI",
+    "site": "GANTC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "MboI",
+    "site": "GATC",
+    "cut": 0,
+    "type": "Type II"
+  },
+  {
+    "name": "Sau3AI",
+    "site": "GATC",
+    "cut": 0,
+    "type": "Type II"
+  },
+  {
+    "name": "AluI",
+    "site": "AGCT",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "DpnI",
+    "site": "GATC",
+    "cut": 0,
+    "type": "Type II"
+  },
+  {
+    "name": "BstBI",
+    "site": "TTCGAA",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "BstEII",
+    "site": "GGTNACC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "HaeIII",
+    "site": "GGCC",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "MseI",
+    "site": "TTAA",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "RsaI",
+    "site": "GTAC",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "TaqI",
+    "site": "TCGA",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "StyI",
+    "site": "CCWWGG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "AciI",
+    "site": "CCGC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BccI",
+    "site": "CCATC",
+    "cut": 4,
+    "type": "Type II"
   }
 ]

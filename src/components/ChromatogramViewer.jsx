@@ -468,6 +468,42 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     setEditValue('');
   };
 
+  // IUPAC nucleotide code matching
+  const matchIUPAC = (pattern, base) => {
+    const iupacCodes = {
+      'A': ['A'],
+      'T': ['T'],
+      'G': ['G'],
+      'C': ['C'],
+      'N': ['A', 'T', 'G', 'C'], // Any base
+      'R': ['A', 'G'],            // Purine
+      'Y': ['C', 'T'],            // Pyrimidine
+      'W': ['A', 'T'],            // Weak
+      'S': ['G', 'C'],            // Strong
+      'M': ['A', 'C'],            // Amino
+      'K': ['G', 'T'],            // Keto
+      'B': ['C', 'G', 'T'],       // Not A
+      'D': ['A', 'G', 'T'],       // Not C
+      'H': ['A', 'C', 'T'],       // Not G
+      'V': ['A', 'C', 'G']        // Not T
+    };
+
+    const allowedBases = iupacCodes[pattern] || [pattern];
+    return allowedBases.includes(base);
+  };
+
+  // Check if a sequence matches a pattern with IUPAC codes
+  const matchesPattern = (sequence, pattern) => {
+    if (sequence.length !== pattern.length) return false;
+
+    for (let i = 0; i < pattern.length; i++) {
+      if (!matchIUPAC(pattern[i], sequence[i])) {
+        return false;
+      }
+    }
+    return true;
+  };
+
   // Search for restriction enzyme sites in the sequence
   const findRestrictionSites = useCallback((sequence, enzymes) => {
     if (!sequence || !enzymes || enzymes.length === 0) {
@@ -481,14 +517,16 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       const site = enzyme.site.toUpperCase();
       const siteLength = site.length;
 
-      // Search for the recognition site in the sequence
+      // Search for the recognition site in the sequence (handles degenerate bases)
       for (let i = 0; i <= upperSequence.length - siteLength; i++) {
-        if (upperSequence.substring(i, i + siteLength) === site) {
+        const subseq = upperSequence.substring(i, i + siteLength);
+        if (matchesPattern(subseq, site)) {
           sites.push({
             enzyme: enzyme.name,
             position: i,
             cutPosition: i + enzyme.cut,
-            site: site,
+            site: subseq, // Store the actual matched sequence
+            pattern: site, // Store the pattern
             type: enzyme.type
           });
         }
@@ -1781,7 +1819,14 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
                   <div key={idx} className="text-xs py-1 border-b border-gray-200 last:border-0">
                     <span className="font-medium text-purple-700">{site.enzyme}</span>
                     <span className="text-gray-600"> @ pos {site.position + 1}</span>
-                    <span className="text-gray-500 text-[10px]"> (cut: {site.cutPosition + 1})</span>
+                    {site.pattern !== site.site && (
+                      <div className="text-[10px] text-gray-500 ml-1 mt-0.5">
+                        {site.pattern} → {site.site}
+                      </div>
+                    )}
+                    {!site.pattern && (
+                      <span className="text-gray-500 text-[10px] ml-1">({site.site})</span>
+                    )}
                   </div>
                 ))}
               </div>
