@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ZoomIn, ZoomOut, RotateCcw, Download, Eye, EyeOff } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCcw, Download, Eye, EyeOff, Menu, X } from 'lucide-react';
 
 const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false }) => {
   console.log('ChromatogramViewer props:', { fileData, fileName }); // Debug log
@@ -50,6 +50,9 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   // Add state for confirmation modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingEdit, setPendingEdit] = useState(null); // {position, oldBase, newBase}
+
+  // Sidebar visibility for mobile
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
 
   // Add keyboard shortcuts for editing bases
@@ -1438,7 +1441,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   }
 
   return (
-    <div className="bg-white rounded-lg border flex flex-col h-full">
+    <div className="bg-white flex h-full relative">
       {/* Confirmation Modal */}
       {showConfirmModal && pendingEdit && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={cancelBaseEdit}>
@@ -1446,7 +1449,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Confirm Base Change</h3>
             <div className="mb-6">
               <p className="text-gray-700 mb-2">
-                Are you sure you want to change the base at position <span className="font-bold">{pendingEdit.position + 1}</span>?
+                Change position <span className="font-bold">{pendingEdit.position + 1}</span>?
               </p>
               <div className="flex items-center justify-center space-x-4 p-4 bg-gray-50 rounded">
                 <div className="text-center">
@@ -1463,13 +1466,13 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
             <div className="flex space-x-3">
               <button
                 onClick={cancelBaseEdit}
-                className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 font-medium"
+                className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmBaseEdit}
-                className="flex-1 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 font-medium"
+                className="flex-1 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
               >
                 Confirm
               </button>
@@ -1478,21 +1481,141 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
         </div>
       )}
 
-      {/* Controls */}
-      <div className="p-4 border-b border-gray-200">
-        <div className="flex justify-between items-center mb-4">
-          <h4 className="text-lg font-semibold text-gray-900">Chromatogram Viewer</h4>
-          <div className="flex items-center space-x-2">
+      {/* Collapsible Sidebar */}
+      <div className={`${sidebarOpen ? 'w-72' : 'w-0'} transition-all duration-300 bg-gray-50 border-r border-gray-200 flex flex-col overflow-hidden`}>
+        <div className="flex-1 overflow-y-auto p-4">
+          {/* File Info */}
+          <div className="mb-4 pb-4 border-b border-gray-200">
+            <h4 className="text-sm font-semibold text-gray-700 mb-1">File</h4>
+            <p className="text-xs text-gray-600 break-all">{fileName || 'Chromatogram'}</p>
+          </div>
+
+          {/* Zoom Controls */}
+          <div className="mb-4 pb-4 border-b border-gray-200">
+            <h4 className="text-sm font-semibold text-gray-700 mb-2">Zoom</h4>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                onClick={() => handleZoom(-0.5)}
+                className="p-2 border border-gray-300 rounded hover:bg-gray-100"
+              >
+                <ZoomOut className="w-5 h-5" />
+              </button>
+              <span className="text-lg font-medium text-gray-700 min-w-[4rem] text-center">
+                {zoomLevel.toFixed(1)}x
+              </span>
+              <button
+                onClick={() => handleZoom(0.5)}
+                className="p-2 border border-gray-300 rounded hover:bg-gray-100"
+              >
+                <ZoomIn className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Selected Position */}
+          {selectedPosition !== null && selectedNucleotide && (
+            <div className="mb-4 pb-4 border-b border-gray-200">
+              <h4 className="text-sm font-semibold text-gray-700 mb-2">Selected</h4>
+              <div className="bg-orange-50 border border-orange-200 rounded p-3">
+                <p className="text-sm text-orange-900 font-medium mb-1">
+                  {selectedNucleotide}{selectedPosition + 1}
+                </p>
+                <p className="text-xs text-orange-700 mb-2">Press A/T/G/C/N to edit</p>
+                {editedPositions.has(selectedPosition) && (
+                  <span className="text-xs text-green-600 font-medium">✓ Edited</span>
+                )}
+                <button
+                  onClick={() => {
+                    setSelectedPosition(null);
+                    setSelectedNucleotide(null);
+                  }}
+                  className="mt-2 w-full text-sm px-2 py-1 bg-orange-600 text-white rounded hover:bg-orange-700"
+                >
+                  Clear Selection
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Highlight Region */}
+          <div className="mb-4 pb-4 border-b border-gray-200">
+            <h4 className="text-sm font-semibold text-gray-700 mb-2">Highlight Region</h4>
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <input
+                  type="number"
+                  value={highlightStart}
+                  onChange={(e) => setHighlightStart(e.target.value)}
+                  placeholder="Start"
+                  min="1"
+                  max={parsedData?.sequenceLength - 1 || 0}
+                  className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded"
+                />
+                <span className="text-sm text-gray-500">to</span>
+                <input
+                  type="number"
+                  value={highlightEnd}
+                  onChange={(e) => setHighlightEnd(e.target.value)}
+                  placeholder="End"
+                  min="0"
+                  max={parsedData?.sequenceLength || 1}
+                  className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded"
+                />
+              </div>
+              <div className="flex space-x-2">
+                <button
+                  onClick={() => setShowHighlight(!showHighlight)}
+                  disabled={!highlightStart || !highlightEnd}
+                  className={`flex-1 px-2 py-1 text-sm rounded ${showHighlight
+                    ? 'bg-yellow-600 text-white'
+                    : 'bg-white text-yellow-700 border border-yellow-300'
+                    } disabled:opacity-50`}
+                >
+                  {showHighlight ? 'Hide' : 'Show'}
+                </button>
+                <button
+                  onClick={() => {
+                    if (highlightStart && highlightEnd && parsedData) {
+                      const startPos = parseInt(highlightStart) - 1;
+                      const endPos = parseInt(highlightEnd) - 1;
+                      if (!isNaN(startPos) && !isNaN(endPos) && startPos >= 0 && endPos < parsedData.baseCalls.length && startPos <= endPos) {
+                        const sequence = parsedData.baseCalls.slice(startPos, endPos + 1).join('');
+                        navigator.clipboard.writeText(sequence);
+                      }
+                    }
+                  }}
+                  disabled={!highlightStart || !highlightEnd}
+                  className="flex-1 px-2 py-1 bg-green-600 text-white text-sm rounded disabled:opacity-50"
+                >
+                  Copy
+                </button>
+              </div>
+              {highlightStart && highlightEnd && parsedData && (() => {
+                const startPos = parseInt(highlightStart) - 1;
+                const endPos = parseInt(highlightEnd) - 1;
+                if (!isNaN(startPos) && !isNaN(endPos) && startPos >= 0 && endPos < parsedData.baseCalls.length && startPos <= endPos) {
+                  return (
+                    <p className="text-xs text-gray-600 text-center">
+                      {endPos - startPos + 1} bases
+                    </p>
+                  );
+                }
+              })()}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="space-y-2">
             <button
               onClick={exportSequence}
-              className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 flex items-center space-x-1"
+              className="w-full px-3 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700 flex items-center justify-center space-x-2"
             >
               <Download className="w-4 h-4" />
               <span>Export FASTA</span>
             </button>
             <button
               onClick={resetView}
-              className="px-3 py-1 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 flex items-center space-x-1"
+              className="w-full px-3 py-2 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 flex items-center justify-center space-x-2"
             >
               <RotateCcw className="w-4 h-4" />
               <span>Reset View</span>
@@ -1500,139 +1623,28 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
             {onClose && (
               <button
                 onClick={onClose}
-                className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 flex items-center space-x-1"
-                title="Close chromatogram viewer"
+                className="w-full px-3 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 flex items-center justify-center space-x-2"
               >
-                <span>&times;</span>
+                <X className="w-4 h-4" />
                 <span>Close</span>
               </button>
             )}
           </div>
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {/* Zoom Controls */}
-          <div className="flex items-center space-x-2">
-            <span className="text-sm font-medium text-gray-700">Zoom:</span>
-            <button
-              onClick={() => handleZoom(-0.5)}
-              className="p-1 border border-gray-300 rounded hover:bg-gray-50"
-            >
-              <ZoomOut className="w-4 h-4" />
-            </button>
-            <span className="text-sm text-gray-600 min-w-[3rem] text-center">
-              {zoomLevel.toFixed(1)}x
-            </span>
-            <button
-              onClick={() => handleZoom(0.5)}
-              className="p-1 border border-gray-300 rounded hover:bg-gray-50"
-            >
-              <ZoomIn className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
       </div>
 
-      {/* Chromatogram Canvas */}
-      <div className="p-4 flex-1 flex flex-col overflow-hidden">
-        {/* Combined Controls: Selected Position + Highlight */}
-        <div className="mb-2 p-3 bg-gradient-to-r from-orange-50 to-yellow-50 border border-orange-200 rounded-lg">
-          <div className="flex items-center gap-3 flex-wrap">
-            {/* Selected Position Section */}
-            {selectedPosition !== null && selectedNucleotide ? (
-              <>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-orange-900">
-                    Selected: <span className="font-bold">{selectedNucleotide}{selectedPosition + 1}</span>
-                  </span>
-                  <span className="text-xs text-orange-700">
-                    (Press A/T/G/C/N)
-                  </span>
-                  {editedPositions.has(selectedPosition) && (
-                    <span className="text-xs text-green-600 font-medium">&bull; Edited</span>
-                  )}
-                  <button
-                    onClick={() => {
-                      setSelectedPosition(null);
-                      setSelectedNucleotide(null);
-                    }}
-                    className="text-orange-600 hover:text-orange-800 text-lg leading-none"
-                    title="Clear selection"
-                  >
-                    &times;
-                  </button>
-                </div>
-                <div className="h-6 w-px bg-gray-300"></div>
-              </>
-            ) : (
-              <span className="text-sm text-gray-500 italic">Click a base to select</span>
-            )}
-            
-            {/* Highlight Section */}
-            <div className="flex items-center gap-2 flex-1">
-              <span className="text-sm font-medium text-yellow-900">Highlight:</span>
-              <input
-                type="number"
-                value={highlightStart}
-                onChange={(e) => setHighlightStart(e.target.value)}
-                placeholder="Start"
-                min="1"
-                max={parsedData?.sequenceLength - 1 || 0}
-                className="w-16 px-2 py-1 text-sm border border-yellow-300 rounded focus:ring-1 focus:ring-yellow-500"
-              />
-              <span className="text-sm text-yellow-700">to</span>
-              <input
-                type="number"
-                value={highlightEnd}
-                onChange={(e) => setHighlightEnd(e.target.value)}
-                placeholder="End"
-                min="0"
-                max={parsedData?.sequenceLength || 1}
-                className="w-16 px-2 py-1 text-sm border border-yellow-300 rounded focus:ring-1 focus:ring-yellow-500"
-              />
-              <button
-                onClick={() => setShowHighlight(!showHighlight)}
-                disabled={!highlightStart || !highlightEnd}
-                className={`px-2 py-1 text-sm rounded ${showHighlight
-                  ? 'bg-yellow-600 text-white hover:bg-yellow-700'
-                  : 'bg-white text-yellow-700 border border-yellow-300 hover:bg-yellow-50'
-                  } disabled:opacity-50`}
-              >
-                {showHighlight ? 'Hide' : 'Show'}
-              </button>
-              <button
-                onClick={() => {
-                  if (highlightStart && highlightEnd && parsedData) {
-                    const startPos = parseInt(highlightStart) - 1;
-                    const endPos = parseInt(highlightEnd) - 1;
-                    if (!isNaN(startPos) && !isNaN(endPos) && startPos >= 0 && endPos < parsedData.baseCalls.length && startPos <= endPos) {
-                      const sequence = parsedData.baseCalls.slice(startPos, endPos + 1).join('');
-                      navigator.clipboard.writeText(sequence);
-                    }
-                  }
-                }}
-                disabled={!highlightStart || !highlightEnd}
-                className="px-2 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-50"
-              >
-                Copy
-              </button>
-              {highlightStart && highlightEnd && parsedData && (() => {
-                const startPos = parseInt(highlightStart) - 1;
-                const endPos = parseInt(highlightEnd) - 1;
-                if (!isNaN(startPos) && !isNaN(endPos) && startPos >= 0 && endPos < parsedData.baseCalls.length && startPos <= endPos) {
-                  return (
-                    <span className="text-sm text-yellow-700">
-                      ({endPos - startPos + 1} bases)
-                    </span>
-                  );
-                }
-              })()}
-            </div>
-          </div>
-        </div>
+      {/* Main Canvas Area */}
+      <div className="flex-1 flex flex-col relative">
+        {/* Menu Toggle Button */}
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="absolute top-2 left-2 z-10 p-2 bg-teal-600 text-white rounded-lg shadow-lg hover:bg-teal-700"
+        >
+          {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+        </button>
 
-        {/* Canvas container - takes remaining height */}
-        <div className="flex-1 min-h-0">
+        {/* Canvas */}
+        <div className="flex-1 p-2 pt-14 pb-12">
           <canvas
             ref={canvasRef}
             onClick={handleCanvasClick}
@@ -1644,17 +1656,9 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
           />
         </div>
 
-        {/* Click instruction */}
-        <div className="mt-2 text-center">
-          <p className="text-xs text-gray-500">
-            Single-click to select a position &bull; Double-click to navigate to that region
-          </p>
-        </div>
-
-        {/* Horizontal Scroll Bar */}
-        <div className="mt-2 px-2">
+        {/* Bottom Scrollbar */}
+        <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2">
           <div className="flex items-center space-x-2">
-            <span className="text-xs text-gray-500 min-w-[3rem]">Start</span>
             <input
               type="range"
               min="0"
@@ -1663,42 +1667,35 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
               onChange={handleScrollbarChange}
               className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
               style={{
-                background: `linear-gradient(to right, #4F46E5 0%, #4F46E5 ${scrollPosition * 100}%, #E5E7EB ${scrollPosition * 100}%, #E5E7EB 100%)`
+                background: `linear-gradient(to right, #0d9488 0%, #0d9488 ${scrollPosition * 100}%, #E5E7EB ${scrollPosition * 100}%, #E5E7EB 100%)`
               }}
             />
-            <span className="text-xs text-gray-500 min-w-[3rem]">End</span>
-          </div>
-
-          <div className="mt-1 text-center">
-            <span className="text-xs text-gray-600">
-              Showing positions {(() => {
-                if (!canvasRef.current || !parsedData || !parsedData.traces) return '0 - 0';
+            <span className="text-xs text-gray-600 whitespace-nowrap">
+              {(() => {
+                if (!canvasRef.current || !parsedData || !parsedData.traces) return '0-0';
 
                 try {
-                  // Calculate the actual base positions being displayed
                   const traceLengths = Object.values(parsedData.traces).map(trace => trace.length);
                   const maxTraceLength = Math.max(...traceLengths);
-                  if (maxTraceLength === 0) return '0 - 0';
+                  if (maxTraceLength === 0) return '0-0';
 
                   const dataLength = maxTraceLength;
-                  const canvasWidth = canvasRef.current.width || 1200; // fallback to default width
+                  const canvasWidth = canvasRef.current.width || 1200;
                   const visiblePoints = Math.floor(canvasWidth / zoomLevel);
                   const startIndex = Math.floor(scrollPosition * (dataLength - visiblePoints));
                   const endIndex = Math.min(startIndex + visiblePoints, dataLength);
 
-                  // Convert trace indices to base positions
                   const startBasePos = Math.floor(startIndex * parsedData.baseCalls.length / maxTraceLength);
                   const endBasePos = Math.floor(endIndex * parsedData.baseCalls.length / maxTraceLength);
 
-                  return `${startBasePos + 1} - ${Math.min(endBasePos, parsedData.baseCalls.length)}`;
+                  return `${startBasePos + 1}-${Math.min(endBasePos, parsedData.baseCalls.length)}`;
                 } catch (error) {
-                  return '0 - 0';
+                  return '0-0';
                 }
               })()}
             </span>
           </div>
         </div>
-
       </div>
     </div>
   );
