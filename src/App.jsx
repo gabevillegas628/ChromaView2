@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { FilePicker } from '@capawesome/capacitor-file-picker';
 import { Upload, FileText, AlertCircle } from 'lucide-react';
 import ChromatogramViewer from './components/ChromatogramViewer';
 
@@ -8,9 +10,62 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Handle file selection using web file input for now
-  // We can add Capacitor FilePicker plugin later for native experience
-  const handleFileSelect = async (event) => {
+  // Check if running on native platform
+  const isNative = Capacitor.isNativePlatform();
+
+  // Handle native file picker (Android/iOS)
+  const handleNativeFilePicker = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const result = await FilePicker.pickFiles({
+        types: ['application/octet-stream', '*/*'],
+        multiple: false,
+        readData: true, // Important: read file data
+      });
+
+      if (!result.files || result.files.length === 0) {
+        setLoading(false);
+        return;
+      }
+
+      const file = result.files[0];
+
+      // Check file extension
+      const fileExtension = file.name.split('.').pop().toLowerCase();
+      if (!['ab1', 'scf', 'abi'].includes(fileExtension)) {
+        setError('Please select a valid chromatogram file (.ab1, .scf)');
+        setLoading(false);
+        return;
+      }
+
+      setFileName(file.name);
+
+      // Convert base64 data to Uint8Array
+      if (file.data) {
+        const base64Data = file.data;
+        const binaryString = atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        setFileData(bytes);
+      } else {
+        throw new Error('No file data received');
+      }
+
+      setLoading(false);
+    } catch (err) {
+      console.error('Error picking file:', err);
+      setError('Failed to read file. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  // Handle web file input (browser fallback)
+  const handleWebFileSelect = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
@@ -46,17 +101,21 @@ function App() {
   };
 
   const triggerFileInput = () => {
-    document.getElementById('file-input').click();
+    if (isNative) {
+      handleNativeFilePicker();
+    } else {
+      document.getElementById('file-input').click();
+    }
   };
 
   return (
     <div className="w-full h-screen bg-gradient-to-br from-teal-50 to-blue-50 flex flex-col">
-      {/* Hidden file input */}
+      {/* Hidden file input - only used for web browsers */}
       <input
         id="file-input"
         type="file"
         accept=".ab1,.scf,.abi"
-        onChange={handleFileSelect}
+        onChange={handleWebFileSelect}
         className="hidden"
       />
 
