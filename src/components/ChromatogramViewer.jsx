@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ZoomIn, ZoomOut, RotateCcw, Download, Eye, EyeOff, Menu, X } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCcw, Download, Eye, EyeOff, Menu, X, Scissors } from 'lucide-react';
+import restrictionEnzymes from '../data/restrictionEnzymes.json';
 
 const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false }) => {
   console.log('ChromatogramViewer props:', { fileData, fileName }); // Debug log
@@ -53,6 +54,11 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
 
   // Sidebar visibility for mobile
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Restriction enzyme mapping
+  const [selectedEnzymes, setSelectedEnzymes] = useState([]);
+  const [restrictionSites, setRestrictionSites] = useState([]);
+  const [showRestrictionSites, setShowRestrictionSites] = useState(false);
 
 
   // Add keyboard shortcuts for editing bases
@@ -136,7 +142,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       }, 10);
       return () => clearTimeout(timer);
     }
-  }, [parsedData, zoomLevel, scrollPosition, showChannels, qualityThreshold, selectedPosition, hoveredPosition, isEditing]);
+  }, [parsedData, zoomLevel, scrollPosition, showChannels, qualityThreshold, selectedPosition, hoveredPosition, isEditing, restrictionSites, showRestrictionSites]);
 
   // FIX: Add cleanup on unmount
   useEffect(() => {
@@ -202,7 +208,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
         cancelAnimationFrame(rafId);
       }
     };
-  }, [parsedData, zoomLevel, scrollPosition, showChannels, isResizing]); // Redraw when these change
+  }, [parsedData, zoomLevel, scrollPosition, showChannels, isResizing, restrictionSites, showRestrictionSites]); // Redraw when these change
 
   // Ensure a final clean redraw when resize completes
   useEffect(() => {
@@ -462,6 +468,48 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     setEditValue('');
   };
 
+  // Search for restriction enzyme sites in the sequence
+  const findRestrictionSites = useCallback((sequence, enzymes) => {
+    if (!sequence || !enzymes || enzymes.length === 0) {
+      return [];
+    }
+
+    const sites = [];
+    const upperSequence = sequence.toUpperCase();
+
+    enzymes.forEach(enzyme => {
+      const site = enzyme.site.toUpperCase();
+      const siteLength = site.length;
+
+      // Search for the recognition site in the sequence
+      for (let i = 0; i <= upperSequence.length - siteLength; i++) {
+        if (upperSequence.substring(i, i + siteLength) === site) {
+          sites.push({
+            enzyme: enzyme.name,
+            position: i,
+            cutPosition: i + enzyme.cut,
+            site: site,
+            type: enzyme.type
+          });
+        }
+      }
+    });
+
+    // Sort by position
+    sites.sort((a, b) => a.position - b.position);
+    return sites;
+  }, []);
+
+  // Effect to search for restriction sites when sequence or selected enzymes change
+  useEffect(() => {
+    if (parsedData && parsedData.sequence && selectedEnzymes.length > 0) {
+      const enzymes = restrictionEnzymes.filter(e => selectedEnzymes.includes(e.name));
+      const sites = findRestrictionSites(parsedData.sequence, enzymes);
+      setRestrictionSites(sites);
+    } else {
+      setRestrictionSites([]);
+    }
+  }, [parsedData, selectedEnzymes, findRestrictionSites]);
 
   const parseChromatogramFile = async (data) => {
     try {
@@ -1215,6 +1263,49 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
         }
       }
     }
+
+    // Draw restriction enzyme cut sites
+    if (showRestrictionSites && restrictionSites.length > 0) {
+      restrictionSites.forEach(site => {
+        // Find the corresponding base position in the trace data
+        const basePosition = site.cutPosition;
+        const peakPosition = peakLocations && peakLocations[basePosition]
+          ? peakLocations[basePosition]
+          : (basePosition * maxTraceLength / baseCalls.length);
+
+        // Check if this site is in the visible range
+        if (peakPosition >= startIndex && peakPosition <= endIndex) {
+          const x = ((peakPosition - startIndex) / (endIndex - startIndex)) * canvas.width;
+
+          if (x >= 0 && x <= canvas.width) {
+            // Draw purple vertical line for cut site
+            ctx.strokeStyle = '#9333EA'; // Purple
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 0.6;
+            ctx.beginPath();
+            ctx.moveTo(x, baseCallHeight);
+            ctx.lineTo(x, baselineY + 20);
+            ctx.stroke();
+            ctx.globalAlpha = 1.0;
+
+            // Draw enzyme name label above the line
+            ctx.fillStyle = '#9333EA';
+            ctx.font = 'bold 9px sans-serif';
+            ctx.save();
+            ctx.translate(x, baseCallHeight - 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText(site.enzyme, 0, 0);
+            ctx.restore();
+
+            // Draw scissors icon at cut position
+            ctx.fillStyle = '#9333EA';
+            ctx.font = '12px sans-serif';
+            ctx.fillText('✂', x - 6, baselineY + 15);
+          }
+        }
+      });
+    }
   };
 
   const handleZoom = (delta) => {
@@ -1602,6 +1693,99 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
                 }
               })()}
             </div>
+          </div>
+
+          {/* Restriction Enzymes */}
+          <div className="mb-4 pb-4 border-b border-gray-200">
+            <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center">
+              <Scissors className="w-4 h-4 mr-2" />
+              Restriction Sites
+            </h4>
+
+            {/* Popular enzymes quick select */}
+            <div className="mb-2">
+              <p className="text-xs text-gray-500 mb-2">Popular:</p>
+              <div className="flex flex-wrap gap-1">
+                {['EcoRI', 'BamHI', 'HindIII', 'PstI', 'XbaI'].map(enzyme => (
+                  <button
+                    key={enzyme}
+                    onClick={() => {
+                      if (selectedEnzymes.includes(enzyme)) {
+                        setSelectedEnzymes(selectedEnzymes.filter(e => e !== enzyme));
+                      } else {
+                        setSelectedEnzymes([...selectedEnzymes, enzyme]);
+                      }
+                    }}
+                    className={`px-2 py-1 text-xs rounded ${
+                      selectedEnzymes.includes(enzyme)
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    {enzyme}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* All enzymes dropdown */}
+            <details className="mb-2">
+              <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-800">
+                All Enzymes ({restrictionEnzymes.length})
+              </summary>
+              <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
+                <div className="grid grid-cols-2 gap-1">
+                  {restrictionEnzymes.map(enzyme => (
+                    <label key={enzyme.name} className="flex items-center space-x-1 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={selectedEnzymes.includes(enzyme.name)}
+                        onChange={() => {
+                          if (selectedEnzymes.includes(enzyme.name)) {
+                            setSelectedEnzymes(selectedEnzymes.filter(e => e !== enzyme.name));
+                          } else {
+                            setSelectedEnzymes([...selectedEnzymes, enzyme.name]);
+                          }
+                        }}
+                        className="w-3 h-3"
+                      />
+                      <span>{enzyme.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </details>
+
+            {/* Show/hide toggle and count */}
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => setShowRestrictionSites(!showRestrictionSites)}
+                disabled={restrictionSites.length === 0}
+                className={`px-3 py-1 text-sm rounded ${
+                  showRestrictionSites
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-white text-purple-700 border border-purple-300'
+                } disabled:opacity-50`}
+              >
+                {showRestrictionSites ? 'Hide Sites' : 'Show Sites'}
+              </button>
+              <span className="text-xs text-gray-600">
+                {restrictionSites.length} site{restrictionSites.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+
+            {/* Found sites list */}
+            {restrictionSites.length > 0 && (
+              <div className="mt-2 max-h-32 overflow-y-auto border border-gray-200 rounded p-2 bg-gray-50">
+                {restrictionSites.map((site, idx) => (
+                  <div key={idx} className="text-xs py-1 border-b border-gray-200 last:border-0">
+                    <span className="font-medium text-purple-700">{site.enzyme}</span>
+                    <span className="text-gray-600"> @ pos {site.position + 1}</span>
+                    <span className="text-gray-500 text-[10px]"> (cut: {site.cutPosition + 1})</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Actions */}
