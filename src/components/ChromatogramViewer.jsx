@@ -1,25 +1,38 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ZoomIn, ZoomOut, RotateCcw, Download, Eye, EyeOff, Menu, X, Scissors } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCcw, Download, Eye, EyeOff, Menu, X, Scissors, Repeat2 } from 'lucide-react';
 import restrictionEnzymes from '../data/restrictionEnzymes.json';
 
 const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false }) => {
   console.log('ChromatogramViewer props:', { fileData, fileName }); // Debug log
   const canvasRef = useRef(null);
+  const offscreenCanvasRef = useRef(null); // For pre-rendered horizontal layout
 
-  // Touch scrolling refs
-  const isTouchScrolling = useRef(false);
-  const touchStartX = useRef(0);
-  const touchStartScrollPos = useRef(0);
-  const rafPendingScroll = useRef(false);
-  const latestTouchX = useRef(0);
-  const previousTouchX = useRef(0);
+  // CLEAN TOUCH SCROLLING ARCHITECTURE
+  // Single source of truth for scroll position during animations
+  const scrollOffsetRef = useRef(0); // normalized 0-1, used during touch/inertia
 
-  // Inertial scrolling refs
-  const velocityX = useRef(0);
-  const lastTouchTime = useRef(0);
-  const inertiaAnimationFrame = useRef(null);
-  const lastInertiaTime = useRef(0);
-  const touchHistory = useRef([]);
+  // Touch state
+  const touchState = useRef({
+    isActive: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastTime: 0,
+    hasMoved: false,
+    velocitySamples: [] // [{velocity, time}, ...]
+  });
+
+  // Inertia state
+  const inertiaState = useRef({
+    isActive: false,
+    velocity: 0,
+    rafId: null,
+    lastTime: 0
+  });
+
+  // Click prevention
+  const preventClickRef = useRef(false);
+  const lastTouchEndTimeRef = useRef(0);
   const [parsedData, setParsedData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -60,6 +73,23 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   const [restrictionSites, setRestrictionSites] = useState([]);
   const [showRestrictionSites, setShowRestrictionSites] = useState(false);
 
+  // Layout mode: 'horizontal' or 'wrapped'
+  const [layoutMode, setLayoutMode] = useState('horizontal');
+
+  // Reverse complement mode
+  const [showReverseComplement, setShowReverseComplement] = useState(false);
+
+  // Sequence search
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchMatches, setSearchMatches] = useState([]);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+
+  // ORF Finder
+  const [showORFs, setShowORFs] = useState(false);
+  const [selectedFrames, setSelectedFrames] = useState(['+1', '+2', '+3']); // Default: show forward frames
+  const [minORFLength, setMinORFLength] = useState(100); // Minimum ORF length in base pairs
+  const [detectedORFs, setDetectedORFs] = useState([]);
+  const [selectedORF, setSelectedORF] = useState(null);
 
   // Add keyboard shortcuts for editing bases
   useEffect(() => {
@@ -137,12 +167,22 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   // FIX: Improved effect with proper cleanup and timing
   useEffect(() => {
     if (parsedData && canvasRef.current) {
-      const timer = setTimeout(() => {
-        drawChromatogram();
-      }, 10);
-      return () => clearTimeout(timer);
+      // CRITICAL: Skip automatic redraw during active touch scrolling or inertia
+      // This prevents state changes (like hoveredPosition) from causing jumps
+      if (touchState.current.isActive || inertiaState.current.isActive) {
+        return; // Skip this render, let manual drawChromatogram() handle it
+      }
+
+      // Use requestAnimationFrame for smoother rendering on mobile
+      let rafId = requestAnimationFrame(() => {
+        // Double RAF to ensure layout has settled (important for mobile)
+        rafId = requestAnimationFrame(() => {
+          drawChromatogram();
+        });
+      });
+      return () => cancelAnimationFrame(rafId);
     }
-  }, [parsedData, zoomLevel, scrollPosition, showChannels, qualityThreshold, selectedPosition, hoveredPosition, isEditing, restrictionSites, showRestrictionSites]);
+  }, [parsedData, zoomLevel, scrollPosition, showChannels, qualityThreshold, selectedPosition, hoveredPosition, isEditing, restrictionSites, showRestrictionSites, layoutMode, showReverseComplement, searchMatches, currentMatchIndex, showORFs, detectedORFs, selectedORF]);
 
   // FIX: Add cleanup on unmount
   useEffect(() => {
@@ -155,10 +195,31 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     };
   }, []);
 
-  // Add this useEffect for wheel event handling
+  // Handle page visibility changes (critical for mobile app stability)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && parsedData && canvasRef.current) {
+        // Page became visible again, force a redraw
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            drawChromatogram();
+          });
+        });
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [parsedData]);
+
+  // Add this useEffect for wheel event handling (only in horizontal mode)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    // Only enable custom wheel handler in horizontal mode
+    // In wrapped mode, use native browser scrolling
+    if (layoutMode !== 'horizontal') return;
 
     const handleWheel = (e) => {
       e.preventDefault();
@@ -178,7 +239,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     return () => {
       canvas.removeEventListener('wheel', handleWheel);
     };
-  }, [parsedData]); // Only re-attach when parsedData changes, not on every scroll
+  }, [parsedData, layoutMode]); // Re-attach when parsedData or layoutMode changes
 
   // Add ResizeObserver to handle container size changes
   useEffect(() => {
@@ -208,211 +269,249 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
         cancelAnimationFrame(rafId);
       }
     };
-  }, [parsedData, zoomLevel, scrollPosition, showChannels, isResizing, restrictionSites, showRestrictionSites]); // Redraw when these change
+  }, [parsedData, zoomLevel, scrollPosition, showChannels, isResizing, restrictionSites, showRestrictionSites, layoutMode]); // Redraw when these change
 
   // Ensure a final clean redraw when resize completes
   useEffect(() => {
     if (!isResizing && parsedData) {
-      // Small delay to ensure final size is set
-      setTimeout(() => {
-        drawChromatogram();
-      }, 50);
+      // Use RAF for consistent timing on mobile
+      let rafId = requestAnimationFrame(() => {
+        rafId = requestAnimationFrame(() => {
+          drawChromatogram();
+        });
+      });
+      return () => cancelAnimationFrame(rafId);
     }
   }, [isResizing, parsedData]);
 
   // Inertial scrolling animation
-  const startInertiaAnimation = useCallback(() => {
+  // Stop inertia animation
+  const stopInertia = useCallback(() => {
+    if (inertiaState.current.rafId !== null) {
+      cancelAnimationFrame(inertiaState.current.rafId);
+      inertiaState.current.rafId = null;
+    }
+    inertiaState.current.isActive = false;
+
+    // Commit final position to React state for UI elements (scrollbar, etc)
+    setScrollPosition(scrollOffsetRef.current);
+  }, []);
+
+  // Start inertia animation with given velocity
+  const startInertia = useCallback((velocity) => {
     if (!parsedData) return;
 
-    lastInertiaTime.current = performance.now();
+    // Stop any existing inertia
+    stopInertia();
+
+    inertiaState.current.isActive = true;
+    inertiaState.current.velocity = velocity;
+    inertiaState.current.lastTime = performance.now();
 
     const inertiaStep = () => {
       const currentTime = performance.now();
-      const deltaTime = currentTime - lastInertiaTime.current;
-      lastInertiaTime.current = currentTime;
+      const deltaTime = currentTime - inertiaState.current.lastTime;
+      inertiaState.current.lastTime = currentTime;
 
-      // Apply friction/deceleration (exponential decay)
-      const FRICTION_FACTOR = 0.99; // Adjust for feel (0.90-0.98 typical)
-      velocityX.current *= Math.pow(FRICTION_FACTOR, deltaTime / 16); // Normalize to ~60fps
+      // Apply friction (exponential decay)
+      const FRICTION = 0.95; // Lower = more friction
+      inertiaState.current.velocity *= Math.pow(FRICTION, deltaTime / 16);
 
-      // Stop if velocity is too small
-      const STOP_THRESHOLD = 0.01; // pixels/ms
-      if (Math.abs(velocityX.current) < STOP_THRESHOLD) {
-        inertiaAnimationFrame.current = null;
-        return; // Stop animation
+      // Stop if velocity too small
+      if (Math.abs(inertiaState.current.velocity) < 0.01) {
+        stopInertia();
+        return;
       }
 
-      // Calculate scroll delta from velocity
+      // Calculate scroll delta
       const canvas = canvasRef.current;
-      if (!canvas) return;
+      if (!canvas || !parsedData) {
+        stopInertia();
+        return;
+      }
 
       const traceLengths = Object.values(parsedData.traces).map(trace => trace.length);
       const dataLength = Math.max(...traceLengths);
       const visiblePoints = Math.floor(canvas.width / zoomLevel);
       const scrollableRange = dataLength - visiblePoints;
 
-      if (scrollableRange <= 0) return;
+      if (scrollableRange <= 0) {
+        stopInertia();
+        return;
+      }
 
-      // Convert velocity to scroll delta
-      const pixelsMoved = velocityX.current * deltaTime;
+      // Update position
+      const pixelsMoved = inertiaState.current.velocity * deltaTime;
       const scrollDelta = (pixelsMoved / canvas.width) * (visiblePoints / scrollableRange);
+      scrollOffsetRef.current = Math.max(0, Math.min(1, scrollOffsetRef.current + scrollDelta));
 
-      // Update scroll position
-      setScrollPosition(prev => {
-        const newPos = prev + scrollDelta;
+      // Render immediately (fast: just copies from pre-rendered offscreen canvas)
+      drawChromatogram();
 
-        // Check boundaries
-        if (newPos <= 0 || newPos >= 1) {
-          // Hit boundary - stop inertia
-          inertiaAnimationFrame.current = null;
-          return Math.max(0, Math.min(1, newPos));
-        }
+      // Continue or stop at boundary
+      if (scrollOffsetRef.current <= 0 || scrollOffsetRef.current >= 1) {
+        stopInertia();
+        return;
+      }
 
-        return newPos;
-      });
-
-      // Continue animation
-      inertiaAnimationFrame.current = requestAnimationFrame(inertiaStep);
+      inertiaState.current.rafId = requestAnimationFrame(inertiaStep);
     };
 
-    inertiaAnimationFrame.current = requestAnimationFrame(inertiaStep);
-  }, [parsedData, zoomLevel]);
+    inertiaState.current.rafId = requestAnimationFrame(inertiaStep);
+  }, [parsedData, zoomLevel, stopInertia]);
 
-  // Touch scrolling handlers with RAF throttling
+  // CLEAN TOUCH HANDLERS - only for horizontal mode
   const handleCanvasTouchStart = useCallback((e) => {
-    e.stopPropagation(); // Prevent event from bubbling to parent elements
+    if (layoutMode !== 'horizontal') return;
+    if (e.touches.length !== 1) return;
 
-    // Cancel any ongoing inertia animation
-    if (inertiaAnimationFrame.current !== null) {
-      cancelAnimationFrame(inertiaAnimationFrame.current);
-      inertiaAnimationFrame.current = null;
-    }
+    e.stopPropagation();
 
-    // Reset velocity and touch history
-    velocityX.current = 0;
-    touchHistory.current = [];
+    // Stop any ongoing inertia (commits scrollOffsetRef to state)
+    stopInertia();
 
-    if (e.touches.length === 1) {
-      touchStartX.current = e.touches[0].clientX;
-      touchStartScrollPos.current = scrollPosition;
-      previousTouchX.current = e.touches[0].clientX; // Initialize for 1:1 dragging
-      lastTouchTime.current = performance.now(); // Initialize timestamp
-      isTouchScrolling.current = true;
-    }
-  }, [scrollPosition]);
+    // Initialize touch state
+    const touch = e.touches[0];
+    touchState.current = {
+      isActive: true,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      lastX: touch.clientX,
+      lastTime: performance.now(),
+      hasMoved: false,
+      velocitySamples: []
+    };
+
+    // CRITICAL: Don't reset scrollOffsetRef from scrollPosition!
+    // If we were in inertia, scrollOffsetRef is already correct and scrollPosition is stale.
+    // If we were idle, scrollOffsetRef already equals scrollPosition.
+    // In both cases, keep scrollOffsetRef as-is!
+
+    // Clear hover to avoid conflicts
+    setHoveredPosition(null);
+  }, [layoutMode, stopInertia]);
 
   const handleCanvasTouchMove = useCallback((e) => {
-    e.preventDefault(); // Prevent page scrolling - ALWAYS, before any checks
-    e.stopPropagation(); // Prevent event from bubbling to parent elements
-
-    if (!isTouchScrolling.current || e.touches.length !== 1) return;
+    if (layoutMode !== 'horizontal') return;
+    if (!touchState.current.isActive || e.touches.length !== 1) return;
 
     const canvas = canvasRef.current;
     if (!canvas || !parsedData) return;
 
-    // Store latest touch position and timestamp
-    latestTouchX.current = e.touches[0].clientX;
+    const touch = e.touches[0];
     const currentTime = performance.now();
 
-    // Only schedule one RAF at a time to prevent flooding
-    if (!rafPendingScroll.current) {
-      rafPendingScroll.current = true;
+    // Check if this is a tap vs scroll gesture
+    const deltaX = Math.abs(touch.clientX - touchState.current.startX);
+    const deltaY = Math.abs(touch.clientY - touchState.current.startY);
+    const MOVE_THRESHOLD = 5;
 
-      requestAnimationFrame(() => {
-        rafPendingScroll.current = false;
-
-        if (!canvas || !parsedData) return;
-
-        // Calculate incremental pixel movement from previous frame (not from start)
-        const pixelsMoved = previousTouchX.current - latestTouchX.current;
-
-        // Track velocity for inertial scrolling
-        const timeDelta = currentTime - lastTouchTime.current;
-        if (timeDelta > 0) {
-          const instantVelocity = pixelsMoved / timeDelta; // pixels/ms
-
-          // Add to touch history for averaging
-          touchHistory.current.push({
-            velocity: instantVelocity,
-            time: currentTime
-          });
-
-          // Keep only recent history (last 5 touch points)
-          const TOUCH_HISTORY_LENGTH = 5;
-          if (touchHistory.current.length > TOUCH_HISTORY_LENGTH) {
-            touchHistory.current.shift();
-          }
-        }
-
-        lastTouchTime.current = currentTime;
-
-        // Get data dimensions for 1:1 mapping
-        const traceLengths = Object.values(parsedData.traces).map(trace => trace.length);
-        const dataLength = Math.max(...traceLengths);
-        const visiblePoints = Math.floor(canvas.width / zoomLevel);
-        const scrollableRange = dataLength - visiblePoints;
-
-        if (scrollableRange <= 0) return; // No scrolling needed if all data fits
-
-        // Convert pixel movement to scroll position change (1:1 direct manipulation)
-        // Moving finger one canvas width = scrolling one canvas width of data
-        const scrollDelta = (pixelsMoved / canvas.width) * (visiblePoints / scrollableRange);
-
-        // Update from CURRENT position (not from touch start position)
-        setScrollPosition(prev => Math.max(0, Math.min(1, prev + scrollDelta)));
-
-        // Update previous position for next frame
-        previousTouchX.current = latestTouchX.current;
-      });
+    if (!touchState.current.hasMoved && (deltaX > MOVE_THRESHOLD || deltaY > MOVE_THRESHOLD)) {
+      touchState.current.hasMoved = true;
+      preventClickRef.current = true;
     }
-  }, [parsedData, zoomLevel]);
 
-  const handleCanvasTouchEnd = useCallback((e) => {
-    e.stopPropagation(); // Prevent event from bubbling to parent elements
-    isTouchScrolling.current = false;
-    previousTouchX.current = 0; // Reset for next touch interaction
+    // Only prevent default after we know it's a scroll (not a tap)
+    if (touchState.current.hasMoved) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
 
-    // Calculate average velocity from recent history for inertial scrolling
-    if (touchHistory.current.length >= 2) {
-      // Filter out entries older than 100ms to avoid stale data
-      const now = performance.now();
-      const recentHistory = touchHistory.current.filter(
-        entry => now - entry.time < 100
-      );
+    // Calculate movement
+    const pixelsMoved = touchState.current.lastX - touch.clientX;
+    const timeDelta = currentTime - touchState.current.lastTime;
 
-      if (recentHistory.length >= 2) {
-        // Use weighted average (recent touches matter more)
-        let totalVelocity = 0;
-        let totalWeight = 0;
+    if (timeDelta > 0 && touchState.current.hasMoved) {
+      // Record velocity sample
+      const velocity = pixelsMoved / timeDelta;
+      touchState.current.velocitySamples.push({ velocity, time: currentTime });
 
-        recentHistory.forEach((entry, index) => {
-          const weight = index + 1; // More recent = higher weight
-          totalVelocity += entry.velocity * weight;
-          totalWeight += weight;
-        });
+      // Keep only recent samples (last 5)
+      if (touchState.current.velocitySamples.length > 5) {
+        touchState.current.velocitySamples.shift();
+      }
 
-        velocityX.current = totalVelocity / totalWeight;
+      // Calculate scroll delta
+      const traceLengths = Object.values(parsedData.traces).map(trace => trace.length);
+      const dataLength = Math.max(...traceLengths);
+      const visiblePoints = Math.floor(canvas.width / zoomLevel);
+      const scrollableRange = dataLength - visiblePoints;
 
-        // Cap maximum velocity to prevent unrealistic scroll speeds
-        const MAX_VELOCITY = 2.0; // pixels/ms
-        velocityX.current = Math.max(-MAX_VELOCITY, Math.min(MAX_VELOCITY, velocityX.current));
+      if (scrollableRange > 0) {
+        const scrollDelta = (pixelsMoved / canvas.width) * (visiblePoints / scrollableRange);
+        scrollOffsetRef.current = Math.max(0, Math.min(1, scrollOffsetRef.current + scrollDelta));
 
-        // Only start inertia if velocity is significant
-        const MIN_VELOCITY_THRESHOLD = 0.1; // pixels/ms
-        if (Math.abs(velocityX.current) > MIN_VELOCITY_THRESHOLD) {
-          startInertiaAnimation();
-        }
+        // Render immediately (fast: just copies from pre-rendered offscreen canvas)
+        drawChromatogram();
       }
     }
 
-    // Clear touch history for next interaction
-    touchHistory.current = [];
-  }, [startInertiaAnimation]);
+    // Update for next move event
+    touchState.current.lastX = touch.clientX;
+    touchState.current.lastTime = currentTime;
+  }, [layoutMode, parsedData, zoomLevel]);
 
-  // Add touch scrolling to canvas
+  const handleCanvasTouchEnd = useCallback((e) => {
+    if (layoutMode !== 'horizontal') return;
+    if (!touchState.current.isActive) return;
+
+    e.stopPropagation();
+
+    const wasTap = !touchState.current.hasMoved;
+
+    // Handle tap - allow click to fire
+    if (wasTap) {
+      preventClickRef.current = false;
+      lastTouchEndTimeRef.current = 0;
+      touchState.current.isActive = false;
+      setScrollPosition(scrollOffsetRef.current);
+      return;
+    }
+
+    // Handle scroll - block clicks for a short time
+    lastTouchEndTimeRef.current = performance.now();
+
+    // Calculate average velocity from recent samples
+    const now = performance.now();
+    const recentSamples = touchState.current.velocitySamples.filter(
+      s => now - s.time < 100 // Only last 100ms
+    );
+
+    if (recentSamples.length >= 2) {
+      // Simple average
+      const avgVelocity = recentSamples.reduce((sum, s) => sum + s.velocity, 0) / recentSamples.length;
+
+      // Start inertia if velocity is significant
+      const MIN_VELOCITY = 0.1; // pixels/ms
+      if (Math.abs(avgVelocity) > MIN_VELOCITY) {
+        // Cap velocity
+        const MAX_VELOCITY = 2.0;
+        const clampedVelocity = Math.max(-MAX_VELOCITY, Math.min(MAX_VELOCITY, avgVelocity));
+
+        startInertia(clampedVelocity);
+        touchState.current.isActive = false;
+        return;
+      }
+    }
+
+    // No inertia - commit position immediately
+    touchState.current.isActive = false;
+    setScrollPosition(scrollOffsetRef.current);
+
+    // Reset click prevention after delay
+    setTimeout(() => {
+      preventClickRef.current = false;
+    }, 300);
+  }, [layoutMode, startInertia]);
+
+  // Add touch scrolling to canvas (only in horizontal mode)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !parsedData) return;
+
+    // Only add touch handlers in horizontal mode
+    // In wrapped mode, use native browser scrolling
+    if (layoutMode !== 'horizontal') return;
 
     canvas.addEventListener('touchstart', handleCanvasTouchStart);
     canvas.addEventListener('touchmove', handleCanvasTouchMove, { passive: false });
@@ -423,13 +522,13 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       canvas.removeEventListener('touchmove', handleCanvasTouchMove);
       canvas.removeEventListener('touchend', handleCanvasTouchEnd);
     };
-  }, [parsedData, handleCanvasTouchStart, handleCanvasTouchMove, handleCanvasTouchEnd]);
+  }, [parsedData, layoutMode, handleCanvasTouchStart, handleCanvasTouchMove, handleCanvasTouchEnd]);
 
   // Cleanup inertia animation on component unmount
   useEffect(() => {
     return () => {
-      if (inertiaAnimationFrame.current !== null) {
-        cancelAnimationFrame(inertiaAnimationFrame.current);
+      if (inertiaState.current.rafId !== null) {
+        cancelAnimationFrame(inertiaState.current.rafId);
       }
     };
   }, []);
@@ -542,12 +641,14 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   useEffect(() => {
     if (parsedData && parsedData.sequence && selectedEnzymes.length > 0) {
       const enzymes = restrictionEnzymes.filter(e => selectedEnzymes.includes(e.name));
-      const sites = findRestrictionSites(parsedData.sequence, enzymes);
+      // Use the currently displayed sequence (forward or reverse complement)
+      const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
+      const sites = findRestrictionSites(displayData.sequence, enzymes);
       setRestrictionSites(sites);
     } else {
       setRestrictionSites([]);
     }
-  }, [parsedData, selectedEnzymes, findRestrictionSites]);
+  }, [parsedData, selectedEnzymes, findRestrictionSites, showReverseComplement]);
 
   const parseChromatogramFile = async (data) => {
     try {
@@ -1029,12 +1130,259 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     return ((baseIndex * 4 - startIndex) / (endIndex - startIndex)) * canvasWidth;
   };
 
+  // Pre-render the full chromatogram to an offscreen canvas (for horizontal mode)
+  const renderToOffscreenCanvas = useCallback(() => {
+    if (!parsedData || layoutMode !== 'horizontal') return;
+
+    const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
+    const { traces, quality, baseCalls, peakLocations } = displayData;
+
+    const traceLengths = Object.values(traces).map(trace => trace.length);
+    const maxTraceLength = Math.max(...traceLengths);
+
+    if (maxTraceLength === 0) return;
+
+    // Get height from container, not from canvas element (which might not be sized yet)
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const container = canvas.parentElement;
+    if (!container) return;
+
+    // Force layout calculation
+    void container.offsetHeight;
+    const height = container.offsetHeight;
+
+    // Don't render if container hasn't been sized yet
+    if (height < 10) {
+      console.log('Container not sized yet, deferring offscreen canvas creation');
+      return;
+    }
+
+    // Create offscreen canvas with full width
+    const fullWidth = Math.floor(maxTraceLength * zoomLevel);
+
+    // Create or resize offscreen canvas
+    if (!offscreenCanvasRef.current) {
+      offscreenCanvasRef.current = document.createElement('canvas');
+    }
+
+    offscreenCanvasRef.current.width = fullWidth;
+    offscreenCanvasRef.current.height = height;
+
+    const offCtx = offscreenCanvasRef.current.getContext('2d', { willReadFrequently: false });
+    if (!offCtx) return;
+
+    // Clear offscreen canvas
+    offCtx.fillStyle = '#ffffff';
+    offCtx.fillRect(0, 0, fullWidth, height);
+
+    // Find global max for normalization
+    let maxValue = 0;
+    Object.values(traces).forEach(trace => {
+      for (let i = 0; i < trace.length; i++) {
+        maxValue = Math.max(maxValue, trace[i]);
+      }
+    });
+    if (maxValue === 0) maxValue = 1;
+
+    // Draw traces
+    const colors = {
+      A: '#00AA00',
+      T: '#FF0000',
+      G: '#000000',
+      C: '#0000FF'
+    };
+
+    const baseCallHeight = 30;
+    const bottomReserve = 50;
+    const traceHeight = Math.max(100, height - baseCallHeight - bottomReserve);
+    const baselineY = baseCallHeight + traceHeight;
+
+    Object.entries(traces).forEach(([base, data]) => {
+      if (!showChannels[base] || data.length === 0) return;
+
+      offCtx.strokeStyle = colors[base];
+      offCtx.lineWidth = 2;
+      offCtx.lineCap = 'round';
+      offCtx.lineJoin = 'round';
+      offCtx.beginPath();
+
+      let pathStarted = false;
+      for (let i = 0; i < data.length; i++) {
+        const x = i * zoomLevel;
+        const normalizedValue = (data[i] / maxValue) * traceHeight;
+        const y = baselineY - normalizedValue;
+
+        if (!pathStarted) {
+          offCtx.moveTo(x, y);
+          pathStarted = true;
+        } else {
+          offCtx.lineTo(x, y);
+        }
+      }
+      offCtx.stroke();
+    });
+
+    // Draw base calls
+    offCtx.font = 'bold 18px monospace';
+    offCtx.textAlign = 'center';
+
+    baseCalls.forEach((base, index) => {
+      const peakPos = peakLocations && peakLocations[index] !== undefined
+        ? peakLocations[index]
+        : (index * maxTraceLength / baseCalls.length);
+      const x = peakPos * zoomLevel;
+
+      offCtx.fillStyle = colors[base] || '#000000';
+      offCtx.fillText(base, x, 20);
+    });
+
+    // Draw quality scores (positioned below the baseline)
+    if (quality && quality.length > 0) {
+      const qualityBarMaxHeight = 25;
+      const qualityBarStartY = baselineY + 5; // Start just below the baseline
+
+      baseCalls.forEach((base, index) => {
+        if (index >= quality.length) return;
+
+        const q = quality[index];
+        const peakPos = peakLocations && peakLocations[index] !== undefined
+          ? peakLocations[index]
+          : (index * maxTraceLength / baseCalls.length);
+        const x = peakPos * zoomLevel;
+
+        let barColor;
+        if (q >= 40) barColor = '#00AA00';
+        else if (q >= 20) barColor = '#FFA500';
+        else barColor = '#FF0000';
+
+        offCtx.fillStyle = barColor;
+        const barHeight = (q / 60) * qualityBarMaxHeight;
+        offCtx.fillRect(x - 2, qualityBarStartY, 4, barHeight);
+      });
+    }
+
+    // Draw position markers
+    offCtx.fillStyle = '#666666';
+    offCtx.font = '10px sans-serif';
+    offCtx.textAlign = 'center';
+
+    const markerInterval = Math.max(10, Math.floor(50 / zoomLevel));
+    for (let i = 0; i < baseCalls.length; i += markerInterval) {
+      const peakPos = peakLocations && peakLocations[i] !== undefined
+        ? peakLocations[i]
+        : (i * maxTraceLength / baseCalls.length);
+      const x = peakPos * zoomLevel;
+
+      offCtx.fillRect(x, height - 35, 1, 5);
+      offCtx.fillText(String(i + 1), x, height - 5);
+    }
+
+    // Draw ORFs (these don't change during scrolling)
+    if (showORFs && detectedORFs.length > 0) {
+      const orfHeight = 14;
+      const orfYOffset = 35;
+
+      detectedORFs.forEach((orf) => {
+        const startPeakPosition = peakLocations && peakLocations[orf.start]
+          ? peakLocations[orf.start]
+          : (orf.start * maxTraceLength / baseCalls.length);
+        const endPeakPosition = peakLocations && peakLocations[orf.end]
+          ? peakLocations[orf.end]
+          : (orf.end * maxTraceLength / baseCalls.length);
+
+        const startX = startPeakPosition * zoomLevel;
+        const endX = endPeakPosition * zoomLevel;
+
+        const frameIndex = ['+1', '+2', '+3', '-1', '-2', '-3'].indexOf(orf.frame);
+        const yPos = orfYOffset + (frameIndex * (orfHeight + 2));
+
+        const isForward = orf.strand === '+';
+        const orfColors = isForward
+          ? ['#3B82F6', '#60A5FA', '#93C5FD']
+          : ['#F97316', '#FB923C', '#FDBA74'];
+        const colorIndex = isForward ? frameIndex : frameIndex - 3;
+
+        offCtx.fillStyle = orfColors[colorIndex];
+        offCtx.fillRect(startX, yPos, endX - startX, orfHeight);
+
+        // Draw amino acids inside the ORF box
+        if (orf.aminoAcids) {
+          offCtx.font = 'bold 10px monospace';
+          offCtx.fillStyle = '#FFFFFF';
+          offCtx.textAlign = 'center';
+          offCtx.textBaseline = 'middle';
+
+          // Draw each amino acid at the position of the middle base of its codon
+          for (let i = 0; i < orf.aminoAcids.length; i++) {
+            const codonStartPos = orf.start + (i * 3);
+            const middleBasePos = codonStartPos + 1;
+
+            const middlePeakPosition = peakLocations && peakLocations[middleBasePos]
+              ? peakLocations[middleBasePos]
+              : (middleBasePos * maxTraceLength / baseCalls.length);
+
+            const x = middlePeakPosition * zoomLevel;
+            offCtx.fillText(orf.aminoAcids[i], x, yPos + orfHeight / 2);
+          }
+        }
+      });
+    }
+
+    // Draw RE sites (these don't change during scrolling)
+    if (showRestrictionSites && restrictionSites.length > 0) {
+      restrictionSites.forEach(site => {
+        const peakPos = peakLocations && peakLocations[site.position]
+          ? peakLocations[site.position]
+          : (site.position * maxTraceLength / baseCalls.length);
+        const x = peakPos * zoomLevel;
+
+        offCtx.strokeStyle = '#9333EA';
+        offCtx.lineWidth = 2;
+        offCtx.setLineDash([4, 4]);
+        offCtx.beginPath();
+        offCtx.moveTo(x, 30);
+        offCtx.lineTo(x, height - 35);
+        offCtx.stroke();
+        offCtx.setLineDash([]);
+
+        offCtx.fillStyle = '#9333EA';
+        offCtx.font = 'bold 14px "Courier New", monospace';
+        offCtx.textAlign = 'left';
+        offCtx.fillText(site.enzyme, x + 4, 42);
+      });
+    }
+
+    console.log('Offscreen canvas rendered:', fullWidth, 'x', height, '| baselineY:', baselineY, '| traceHeight:', traceHeight);
+  }, [parsedData, zoomLevel, showChannels, showReverseComplement, layoutMode, showORFs, detectedORFs, showRestrictionSites, restrictionSites]);
+
+  // Re-render offscreen canvas when relevant data changes
+  useEffect(() => {
+    if (layoutMode === 'horizontal' && parsedData) {
+      renderToOffscreenCanvas();
+    } else if (offscreenCanvasRef.current) {
+      // Clear offscreen canvas when not in horizontal mode to save memory
+      offscreenCanvasRef.current = null;
+    }
+  }, [parsedData, zoomLevel, showChannels, showReverseComplement, layoutMode, showORFs, detectedORFs, showRestrictionSites, restrictionSites, renderToOffscreenCanvas]);
+
   const drawChromatogram = () => {
     const canvas = canvasRef.current;
     if (!canvas || !parsedData) return;
 
-    const ctx = canvas.getContext('2d');
-    const { traces, quality, baseCalls } = parsedData;
+    const ctx = canvas.getContext('2d', { willReadFrequently: false });
+
+    // Validate context (important for mobile WebView)
+    if (!ctx) {
+      console.warn('Canvas context not available, retrying...');
+      requestAnimationFrame(() => drawChromatogram());
+      return;
+    }
+
+    // Use reverse complement data if toggle is enabled
+    const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
+    const { traces, quality, baseCalls, peakLocations } = displayData;
 
     // Validate trace data
     const traceLengths = Object.values(traces).map(trace => trace.length);
@@ -1052,8 +1400,21 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     // Set canvas size dynamically based on container
     const container = canvas.parentElement;
     if (container) {
+      // Force layout recalculation (important for mobile WebView)
+      void container.offsetHeight;
       canvas.width = container.offsetWidth || 1200;
-      canvas.height = container.offsetHeight || 300;
+
+      if (layoutMode === 'wrapped') {
+        // In wrapped mode, calculate height based on number of rows needed
+        const traceLengths = Object.values(traces).map(trace => trace.length);
+        const maxTraceLength = Math.max(...traceLengths);
+        const tracePointsPerRow = Math.floor(canvas.width / zoomLevel);
+        const numRows = Math.ceil(maxTraceLength / tracePointsPerRow);
+        const rowHeight = 200; // Height per row
+        canvas.height = numRows * rowHeight;
+      } else {
+        canvas.height = container.offsetHeight || 300;
+      }
     } else {
       // Fallback to larger default sizes
       canvas.width = 1600;
@@ -1064,11 +1425,79 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    if (layoutMode === 'wrapped') {
+      // Wrapped layout: draw multiple rows
+      drawWrappedLayout(ctx, traces, quality, baseCalls, maxTraceLength, peakLocations);
+    } else {
+      // Horizontal scrolling layout: draw single row
+      drawHorizontalLayout(ctx, traces, quality, baseCalls, maxTraceLength, peakLocations);
+    }
+  };
+
+  const drawHorizontalLayout = (ctx, traces, quality, baseCalls, maxTraceLength, peakLocations) => {
+    const canvas = canvasRef.current;
+
     // Calculate visible range
+    // Use scrollOffsetRef during touch/inertia, otherwise use React state
+    const currentScrollPos = (touchState.current.isActive || inertiaState.current.isActive)
+      ? scrollOffsetRef.current
+      : scrollPosition;
     const dataLength = maxTraceLength;
     const visiblePoints = Math.floor(canvas.width / zoomLevel);
-    const startIndex = Math.floor(scrollPosition * (dataLength - visiblePoints));
+    const startIndex = Math.floor(currentScrollPos * (dataLength - visiblePoints));
     const endIndex = Math.min(startIndex + visiblePoints, dataLength);
+
+    // Check if offscreen canvas needs regeneration (height mismatch or doesn't exist)
+    const needsRegeneration = !offscreenCanvasRef.current ||
+                              offscreenCanvasRef.current.width === 0 ||
+                              offscreenCanvasRef.current.height !== canvas.height;
+
+    // If we have a pre-rendered offscreen canvas with matching dimensions, just copy the visible portion
+    if (!needsRegeneration && offscreenCanvasRef.current) {
+      const sourceX = startIndex * zoomLevel;
+      const sourceWidth = canvas.width;
+      const sourceHeight = canvas.height;
+
+      // Copy visible portion from offscreen canvas
+      ctx.drawImage(
+        offscreenCanvasRef.current,
+        sourceX, 0, // source x, y
+        sourceWidth, sourceHeight, // source width, height
+        0, 0, // dest x, y
+        canvas.width, canvas.height // dest width, height
+      );
+
+      // Draw dynamic overlays on top (these change based on interaction)
+      drawHorizontalOverlays(ctx, baseCalls, maxTraceLength, peakLocations, startIndex, endIndex);
+      return;
+    }
+
+    // Need to regenerate offscreen canvas (e.g., after layout switch)
+    if (needsRegeneration) {
+      renderToOffscreenCanvas();
+      // If offscreen canvas is now ready, use it
+      if (offscreenCanvasRef.current && offscreenCanvasRef.current.width > 0) {
+        const sourceX = startIndex * zoomLevel;
+        ctx.drawImage(
+          offscreenCanvasRef.current,
+          sourceX, 0,
+          canvas.width, canvas.height,
+          0, 0,
+          canvas.width, canvas.height
+        );
+        drawHorizontalOverlays(ctx, baseCalls, maxTraceLength, peakLocations, startIndex, endIndex);
+        return;
+      }
+    }
+
+    // Fallback: if offscreen canvas still not ready, do full render (should rarely happen)
+    renderHorizontalFull(ctx, traces, quality, baseCalls, maxTraceLength, peakLocations, startIndex, endIndex);
+    drawHorizontalOverlays(ctx, baseCalls, maxTraceLength, peakLocations, startIndex, endIndex);
+  };
+
+  // Render full chromatogram (fallback when offscreen canvas not available)
+  const renderHorizontalFull = (ctx, traces, quality, baseCalls, maxTraceLength, peakLocations, startIndex, endIndex) => {
+    const canvas = canvasRef.current;
 
     // Find the maximum value in the visible range for normalization
     let maxValue = 0;
@@ -1077,24 +1506,21 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
         maxValue = Math.max(maxValue, trace[i]);
       }
     });
-
-    // Prevent division by zero
     if (maxValue === 0) maxValue = 1;
 
-    // Draw chromatogram traces with normalization
     const colors = {
-      A: '#00AA00', // Green
-      T: '#FF0000', // Red
-      G: '#000000', // Black
-      C: '#0000FF'  // Blue
+      A: '#00AA00',
+      T: '#FF0000',
+      G: '#000000',
+      C: '#0000FF'
     };
 
-    // Dynamic layout based on canvas height
-    const baseCallHeight = 30;  // Space for base call letters at top
-    const bottomReserve = 50;   // Space for quality bars, tick marks, and position numbers
-    const traceHeight = Math.max(100, canvas.height - baseCallHeight - bottomReserve); // Available height for traces
+    const baseCallHeight = 30;
+    const bottomReserve = 50;
+    const traceHeight = Math.max(100, canvas.height - baseCallHeight - bottomReserve);
     const baselineY = baseCallHeight + traceHeight;
 
+    // Draw traces
     Object.entries(traces).forEach(([base, data]) => {
       if (!showChannels[base] || data.length === 0) return;
 
@@ -1105,10 +1531,8 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       ctx.beginPath();
 
       let pathStarted = false;
-
       for (let i = startIndex; i < endIndex && i < data.length; i++) {
         const x = ((i - startIndex) / (endIndex - startIndex)) * canvas.width;
-        // Normalize the y value to fit in available height
         const normalizedValue = (data[i] / maxValue) * traceHeight;
         const y = baselineY - normalizedValue;
 
@@ -1122,156 +1546,219 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       ctx.stroke();
     });
 
+    // Draw base calls and quality
+    ctx.font = 'bold 18px monospace';
+    ctx.textAlign = 'center';
 
-    // Draw base calls and quality (SINGLE LOOP ONLY)
-    ctx.font = 'bold 16px monospace';
+    baseCalls.forEach((base, index) => {
+      const peakPos = peakLocations && peakLocations[index] !== undefined
+        ? peakLocations[index]
+        : (index * maxTraceLength / baseCalls.length);
 
-    const { peakLocations } = parsedData;
+      if (peakPos < startIndex || peakPos > endIndex) return;
+      const x = ((peakPos - startIndex) / (endIndex - startIndex)) * canvas.width;
 
-    for (let i = 0; i < baseCalls.length; i++) {
-      // Use actual peak location or fallback to estimated position
-      const peakPosition = peakLocations && peakLocations[i]
+      ctx.fillStyle = colors[base] || '#000000';
+      ctx.fillText(base, x, 20);
+
+      // Quality bar (draw below the baseline)
+      if (quality && quality[index] !== undefined) {
+        const q = quality[index];
+        let barColor;
+        if (q >= 40) barColor = '#00AA00';
+        else if (q >= 20) barColor = '#FFA500';
+        else barColor = '#FF0000';
+
+        ctx.fillStyle = barColor;
+        const barHeight = (q / 60) * 25;
+        ctx.fillRect(x - 2, baselineY + 5, 4, barHeight);
+      }
+    });
+
+    // Draw position markers
+    ctx.fillStyle = '#666666';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+
+    const markerInterval = Math.max(10, Math.floor(50 / zoomLevel));
+    for (let i = 0; i < baseCalls.length; i += markerInterval) {
+      const peakPos = peakLocations && peakLocations[i] !== undefined
         ? peakLocations[i]
         : (i * maxTraceLength / baseCalls.length);
 
-      // Check if this peak is in the visible range
-      if (peakPosition < startIndex || peakPosition > endIndex) continue;
+      if (peakPos < startIndex || peakPos > endIndex) continue;
+      const x = ((peakPos - startIndex) / (endIndex - startIndex)) * canvas.width;
 
-      const x = ((peakPosition - startIndex) / (endIndex - startIndex)) * canvas.width;
-      const base = baseCalls[i];
-      const qual = quality[i] || 0;
+      ctx.fillRect(x, canvas.height - 35, 1, 5);
+      ctx.fillText(String(i + 1), x, canvas.height - 5);
+    }
+  };
 
-      // Only draw if position is visible
-      if (x >= -20 && x <= canvas.width + 20) {
-        // Highlight selected position
-        if (selectedPosition === i) {
-          ctx.fillStyle = '#FFD700';
-          ctx.fillRect(x - 12, 5, 24, baseCallHeight - 5);
-          ctx.strokeStyle = '#FF6600';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(x - 12, 5, 24, baseCallHeight - 5);
-        }
+  // Separated overlay rendering for interactive elements only (drawn on top of offscreen canvas copy)
+  const drawHorizontalOverlays = (ctx, baseCalls, maxTraceLength, peakLocations, startIndex, endIndex) => {
+    const canvas = canvasRef.current;
 
-        // Highlight N bases with transparent red background
-        if (base === 'N') {
-          ctx.fillStyle = 'rgba(255, 0, 0, 0.3)'; // Transparent red
-          ctx.fillRect(x - 12, 5, 24, baseCallHeight - 5);
-          ctx.strokeStyle = '#FF0000'; // Red border
-          ctx.lineWidth = 1;
-          ctx.strokeRect(x - 12, 5, 24, baseCallHeight - 5);
-        }
+    const baseCallHeight = 30;
+    const bottomReserve = 50;
+    const traceHeight = Math.max(100, canvas.height - baseCallHeight - bottomReserve);
+    const baselineY = baseCallHeight + traceHeight;
 
-        // Highlight edited positions with a different color
-        if (editedPositions.has(i)) {
-          ctx.fillStyle = 'rgba(128, 0, 255, 0.3)'; // Purple tint for edited bases
-          ctx.fillRect(x - 12, 5, 24, baseCallHeight - 5);
-          ctx.strokeStyle = '#8000FF';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(x - 12, 5, 24, baseCallHeight - 5);
-        }
+    // Helper to convert trace position to screen X
+    const traceToScreenX = (tracePos) => {
+      return ((tracePos - startIndex) / (endIndex - startIndex)) * canvas.width;
+    };
 
-        // Always color base calls by their nucleotide type
-        ctx.fillStyle = colors[base] || '#666666';
+    // Draw selected ORF highlight border (on top of pre-rendered ORFs)
+    if (showORFs && selectedORF !== null && detectedORFs[selectedORF]) {
+      const orf = detectedORFs[selectedORF];
+      const orfHeight = 14;
+      const orfYOffset = 35;
 
-        // Draw base letter
-        ctx.fillText(base, x - 6, baseCallHeight - 5);
+      const startPeakPosition = peakLocations && peakLocations[orf.start]
+        ? peakLocations[orf.start]
+        : (orf.start * maxTraceLength / baseCalls.length);
+      const endPeakPosition = peakLocations && peakLocations[orf.end]
+        ? peakLocations[orf.end]
+        : (orf.end * maxTraceLength / baseCalls.length);
 
-        // Draw quality bar
-        ctx.fillStyle = qual >= qualityThreshold ? colors[base] || '#666666' : '#CCCCCC';
-        const barHeight = (qual / 60) * 12;
-        ctx.fillRect(x - 2, baselineY + 5, 4, barHeight);  // Changed +20 to +5
+      if (endPeakPosition >= startIndex && startPeakPosition <= endIndex) {
+        const startX = Math.max(0, traceToScreenX(startPeakPosition));
+        const endX = Math.min(canvas.width, traceToScreenX(endPeakPosition));
+
+        const frameIndex = ['+1', '+2', '+3', '-1', '-2', '-3'].indexOf(orf.frame);
+        const yPos = orfYOffset + (frameIndex * (orfHeight + 2));
+
+        // Draw thick border for selected ORF
+        ctx.strokeStyle = '#312E81';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(startX, yPos, endX - startX, orfHeight);
+
+        // Add semi-transparent overlay
+        ctx.fillStyle = 'rgba(79, 70, 229, 0.3)';
+        ctx.fillRect(startX, yPos, endX - startX, orfHeight);
       }
     }
 
-
-    // Draw position markers at the bottom
-    ctx.fillStyle = '#666666';
-    ctx.font = '24px monospace';
-
-    const positionInterval = zoomLevel > 10 ? 10 : zoomLevel > 5 ? 25 : 50;
-
-    for (let pos = 0; pos < baseCalls.length; pos += positionInterval) {
-      const peakPosition = peakLocations && peakLocations[pos]
-        ? peakLocations[pos]
-        : (pos * maxTraceLength / baseCalls.length);
-
-      if (peakPosition < startIndex || peakPosition > endIndex) continue;
-
-      const x = ((peakPosition - startIndex) / (endIndex - startIndex)) * canvas.width;
-
-      if (x >= 0 && x <= canvas.width) {
-        // Draw position number
-        ctx.fillStyle = '#666666';
-        ctx.fillText((pos + 1).toString(), x - 10, canvas.height - 5);  // Now shows 1-based positions
-
-        // Draw tick mark
-        ctx.strokeStyle = '#CCCCCC';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(x, baselineY + 20);  // Start just below quality bars
-        ctx.lineTo(x, canvas.height - 15);  // End just above position numbers
-        ctx.stroke();
-      }
-    }
-
-
-    // Draw selected position highlight line
-    if (selectedPosition !== null) {
-      const { peakLocations } = parsedData;
-      const peakPosition = peakLocations && peakLocations[selectedPosition]
-        ? peakLocations[selectedPosition]
-        : (selectedPosition * maxTraceLength / baseCalls.length);
-
-      const selectedX = ((peakPosition - startIndex) / (endIndex - startIndex)) * canvas.width;
-      if (selectedX >= 0 && selectedX <= canvas.width) {
-        ctx.strokeStyle = '#FF6600';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 5]);
-        ctx.beginPath();
-        ctx.moveTo(selectedX, baseCallHeight);
-        ctx.lineTo(selectedX, baselineY + 20);  // End just below quality bars
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-    }
-
-    // Draw hover highlight
+    // Draw hover highlight (for bases)
     if (hoveredPosition !== null && hoveredPosition !== selectedPosition) {
-      const { peakLocations } = parsedData;
       const peakPosition = peakLocations && peakLocations[hoveredPosition]
         ? peakLocations[hoveredPosition]
         : (hoveredPosition * maxTraceLength / baseCalls.length);
 
-      const hoverX = ((peakPosition - startIndex) / (endIndex - startIndex)) * canvas.width;
-      if (hoverX >= 0 && hoverX <= canvas.width) {
-        ctx.fillStyle = 'rgba(173, 216, 230, 0.4)';
-        ctx.fillRect(hoverX - 12, 5, 24, baselineY + 20 - 5);  // Height from top to below quality bars
+      if (peakPosition >= startIndex && peakPosition <= endIndex) {
+        const hoverX = traceToScreenX(peakPosition);
+        if (hoverX >= 0 && hoverX <= canvas.width) {
+          ctx.fillStyle = 'rgba(173, 216, 230, 0.4)';
+          ctx.fillRect(hoverX - 12, 5, 24, baselineY + 20 - 5);
+
+          // Redraw the base letter on top of the hover highlight
+          const hoveredBase = baseCalls[hoveredPosition];
+          const colors = {
+            A: '#00AA00',
+            T: '#FF0000',
+            G: '#000000',
+            C: '#0000FF'
+          };
+          ctx.font = 'bold 18px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = colors[hoveredBase] || '#000000';
+          ctx.fillText(hoveredBase, hoverX, 20);
+        }
       }
     }
 
-    // Draw quality threshold line
-    ctx.strokeStyle = '#FF6B6B';
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    const thresholdY = baselineY + 20 + (qualityThreshold / 60) * 12;
-    ctx.moveTo(0, thresholdY);
-    ctx.lineTo(canvas.width, thresholdY);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    // Draw selected position highlight
+    if (selectedPosition !== null) {
+      const peakPosition = peakLocations && peakLocations[selectedPosition]
+        ? peakLocations[selectedPosition]
+        : (selectedPosition * maxTraceLength / baseCalls.length);
 
-    // Draw scale info
-    ctx.fillStyle = '#666666';
-    ctx.font = '10px sans-serif';
+      if (peakPosition >= startIndex && peakPosition <= endIndex) {
+        const selectedX = traceToScreenX(peakPosition);
+        if (selectedX >= 0 && selectedX <= canvas.width) {
+          // Highlight box
+          ctx.fillStyle = '#FFD700';
+          ctx.fillRect(selectedX - 12, 5, 24, baseCallHeight - 5);
+          ctx.strokeStyle = '#FF6600';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(selectedX - 12, 5, 24, baseCallHeight - 5);
+
+          // CRITICAL: Redraw the base letter on top of the highlight
+          const selectedBase = baseCalls[selectedPosition];
+          const colors = {
+            A: '#00AA00',
+            T: '#FF0000',
+            G: '#000000',
+            C: '#0000FF'
+          };
+          ctx.font = 'bold 18px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = colors[selectedBase] || '#000000';
+          ctx.fillText(selectedBase, selectedX, 20);
+
+          // Vertical line through trace
+          ctx.strokeStyle = '#FF6600';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          ctx.moveTo(selectedX, baseCallHeight);
+          ctx.lineTo(selectedX, baselineY + 20);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+    }
+
+    // Draw search match highlights
+    if (searchMatches.length > 0 && currentMatchIndex >= 0 && currentMatchIndex < searchMatches.length) {
+      const match = searchMatches[currentMatchIndex];
+      const startPeakPosition = peakLocations && peakLocations[match.start]
+        ? peakLocations[match.start]
+        : (match.start * maxTraceLength / baseCalls.length);
+      const endPeakPosition = peakLocations && peakLocations[match.end]
+        ? peakLocations[match.end]
+        : (match.end * maxTraceLength / baseCalls.length);
+
+      if (endPeakPosition >= startIndex && startPeakPosition <= endIndex) {
+        const startX = Math.max(0, traceToScreenX(startPeakPosition));
+        const endX = Math.min(canvas.width, traceToScreenX(endPeakPosition));
+
+        ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
+        ctx.fillRect(startX - 12, 5, (endX - startX) + 24, baselineY + 20 - 5);
+        ctx.strokeStyle = '#FFAA00';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(startX - 12, 5, (endX - startX) + 24, baselineY + 20 - 5);
+
+        // Redraw base letters in the search match region
+        const colors = {
+          A: '#00AA00',
+          T: '#FF0000',
+          G: '#000000',
+          C: '#0000FF'
+        };
+        ctx.font = 'bold 18px monospace';
+        ctx.textAlign = 'center';
+
+        for (let i = match.start; i <= match.end && i < baseCalls.length; i++) {
+          const peakPos = peakLocations && peakLocations[i] !== undefined
+            ? peakLocations[i]
+            : (i * maxTraceLength / baseCalls.length);
+
+          if (peakPos >= startIndex && peakPos <= endIndex) {
+            const x = traceToScreenX(peakPos);
+            ctx.fillStyle = colors[baseCalls[i]] || '#000000';
+            ctx.fillText(baseCalls[i], x, 20);
+          }
+        }
+      }
+    }
 
     // Draw sequence highlight
-    if (showHighlight && highlightStart && highlightEnd && parsedData) {
+    if (showHighlight && highlightStart && highlightEnd) {
       const startPos = parseInt(highlightStart) - 1;
       const endPos = parseInt(highlightEnd) - 1;
 
       if (!isNaN(startPos) && !isNaN(endPos) && startPos >= 0 && endPos < baseCalls.length && startPos <= endPos) {
-        const { peakLocations } = parsedData;
-
-        // Get start and end positions
         const startPeakPosition = peakLocations && peakLocations[startPos]
           ? peakLocations[startPos]
           : (startPos * maxTraceLength / baseCalls.length);
@@ -1279,70 +1766,439 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
           ? peakLocations[endPos]
           : (endPos * maxTraceLength / baseCalls.length);
 
-        // Check if highlight is in visible range
         if (endPeakPosition >= startIndex && startPeakPosition <= endIndex) {
-          const startX = Math.max(0, ((startPeakPosition - startIndex) / (endIndex - startIndex)) * canvas.width);
-          const endX = Math.min(canvas.width, ((endPeakPosition - startIndex) / (endIndex - startIndex)) * canvas.width);
+          const startX = Math.max(0, traceToScreenX(startPeakPosition));
+          const endX = Math.min(canvas.width, traceToScreenX(endPeakPosition));
 
-          // Draw highlight background
-          ctx.fillStyle = 'rgba(255, 255, 0, 0.3)'; // Yellow with transparency
-          ctx.fillRect(startX - 12, 5, endX - startX + 24, baselineY + 20 - 5);
-
-          // Draw highlight borders
-          ctx.strokeStyle = '#FFD700';
+          ctx.fillStyle = 'rgba(135, 206, 250, 0.3)';
+          ctx.fillRect(startX - 12, 5, (endX - startX) + 24, baselineY + 20 - 5);
+          ctx.strokeStyle = '#4682B4';
           ctx.lineWidth = 2;
-          ctx.setLineDash([]);
-          ctx.beginPath();
-          ctx.moveTo(startX, 5);
-          ctx.lineTo(startX, baselineY + 20);
-          ctx.moveTo(endX, 5);
-          ctx.lineTo(endX, baselineY + 20);
-          ctx.stroke();
+          ctx.strokeRect(startX - 12, 5, (endX - startX) + 24, baselineY + 20 - 5);
+
+          // Redraw base letters in the sequence highlight region
+          const colors = {
+            A: '#00AA00',
+            T: '#FF0000',
+            G: '#000000',
+            C: '#0000FF'
+          };
+          ctx.font = 'bold 18px monospace';
+          ctx.textAlign = 'center';
+
+          for (let i = startPos; i <= endPos && i < baseCalls.length; i++) {
+            const peakPos = peakLocations && peakLocations[i] !== undefined
+              ? peakLocations[i]
+              : (i * maxTraceLength / baseCalls.length);
+
+            if (peakPos >= startIndex && peakPos <= endIndex) {
+              const x = traceToScreenX(peakPos);
+              ctx.fillStyle = colors[baseCalls[i]] || '#000000';
+              ctx.fillText(baseCalls[i], x, 20);
+            }
+          }
         }
       }
     }
+  };
 
-    // Draw restriction enzyme cut sites
-    if (showRestrictionSites && restrictionSites.length > 0) {
-      restrictionSites.forEach(site => {
-        // Find the corresponding base position in the trace data
-        const basePosition = site.cutPosition;
-        const peakPosition = peakLocations && peakLocations[basePosition]
-          ? peakLocations[basePosition]
-          : (basePosition * maxTraceLength / baseCalls.length);
+  const drawWrappedLayout = (ctx, traces, quality, baseCalls, maxTraceLength, peakLocations) => {
+    const canvas = canvasRef.current;
 
-        // Check if this site is in the visible range
-        if (peakPosition >= startIndex && peakPosition <= endIndex) {
-          const x = ((peakPosition - startIndex) / (endIndex - startIndex)) * canvas.width;
+    // Calculate trace points per row based on canvas width and zoom
+    const tracePointsPerRow = Math.floor(canvas.width / zoomLevel);
+    const numRows = Math.ceil(maxTraceLength / tracePointsPerRow);
+    const rowHeight = 200;
 
-          if (x >= 0 && x <= canvas.width) {
-            // Draw purple vertical line for cut site
-            ctx.strokeStyle = '#9333EA'; // Purple
-            ctx.lineWidth = 2;
-            ctx.setLineDash([]);
-            ctx.globalAlpha = 0.6;
-            ctx.beginPath();
-            ctx.moveTo(x, baseCallHeight);
-            ctx.lineTo(x, baselineY + 20);
-            ctx.stroke();
-            ctx.globalAlpha = 1.0;
+    // Draw chromatogram traces with normalization
+    const colors = {
+      A: '#00AA00', // Green
+      T: '#FF0000', // Red
+      G: '#000000', // Black
+      C: '#0000FF'  // Blue
+    };
 
-            // Draw enzyme name label above the line
-            ctx.fillStyle = '#9333EA';
-            ctx.font = 'bold 9px sans-serif';
-            ctx.save();
-            ctx.translate(x, baseCallHeight - 2);
-            ctx.rotate(-Math.PI / 2);
-            ctx.fillText(site.enzyme, 0, 0);
-            ctx.restore();
+    // Layout constants per row
+    const baseCallHeight = 30;
+    const bottomReserve = 50;
+    const traceHeight = rowHeight - baseCallHeight - bottomReserve;
 
-            // Draw scissors icon at cut position
-            ctx.fillStyle = '#9333EA';
-            ctx.font = '12px sans-serif';
-            ctx.fillText('✂', x - 6, baselineY + 15);
-          }
+    // Draw each row
+    for (let row = 0; row < numRows; row++) {
+      const rowY = row * rowHeight;
+
+      // Calculate the trace data range for this row
+      const startTraceIndex = row * tracePointsPerRow;
+      const endTraceIndex = Math.min(startTraceIndex + tracePointsPerRow, maxTraceLength);
+
+      // Find which bases have peaks in this trace range
+      let startBase = -1;
+      let endBase = -1;
+      for (let i = 0; i < baseCalls.length; i++) {
+        const peakPosition = peakLocations && peakLocations[i]
+          ? peakLocations[i]
+          : (i * maxTraceLength / baseCalls.length);
+
+        if (peakPosition >= startTraceIndex && peakPosition < endTraceIndex) {
+          if (startBase === -1) startBase = i;
+          endBase = i + 1;
+        } else if (startBase !== -1) {
+          // We've passed the range
+          break;
+        }
+      }
+
+      // Skip this row if no bases found
+      if (startBase === -1) continue;
+
+      // Find max value in this row for normalization
+      let maxValue = 0;
+      Object.values(traces).forEach(trace => {
+        for (let i = startTraceIndex; i < endTraceIndex && i < trace.length; i++) {
+          maxValue = Math.max(maxValue, trace[i]);
         }
       });
+      if (maxValue === 0) maxValue = 1;
+
+      const baselineY = rowY + baseCallHeight + traceHeight;
+
+      // Draw traces for this row
+      Object.entries(traces).forEach(([base, data]) => {
+        if (!showChannels[base] || data.length === 0) return;
+
+        ctx.strokeStyle = colors[base];
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+
+        let pathStarted = false;
+
+        for (let i = startTraceIndex; i < endTraceIndex && i < data.length; i++) {
+          const x = ((i - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width;
+          const normalizedValue = (data[i] / maxValue) * traceHeight;
+          const y = baselineY - normalizedValue;
+
+          if (!pathStarted) {
+            ctx.moveTo(x, y);
+            pathStarted = true;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        ctx.stroke();
+      });
+
+      // Draw ORFs above base calls for this row
+      if (showORFs && detectedORFs.length > 0) {
+        const orfHeight = 14;
+        const orfYOffset = 35;
+
+        detectedORFs.forEach((orf, idx) => {
+          const startPos = orf.start;
+          const endPos = orf.end;
+
+          // Check if ORF overlaps with this row
+          if (endPos >= startBase && startPos < endBase) {
+            const rowStartPos = Math.max(startPos, startBase);
+            const rowEndPos = Math.min(endPos, endBase - 1);
+
+            const startPeakPosition = peakLocations && peakLocations[rowStartPos]
+              ? peakLocations[rowStartPos]
+              : (rowStartPos * maxTraceLength / baseCalls.length);
+            const endPeakPosition = peakLocations && peakLocations[rowEndPos]
+              ? peakLocations[rowEndPos]
+              : (rowEndPos * maxTraceLength / baseCalls.length);
+
+            const startX = Math.max(0, ((startPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width);
+            const endX = Math.min(canvas.width, ((endPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width);
+
+            // Calculate Y position based on frame
+            const frameIndex = ['+1', '+2', '+3', '-1', '-2', '-3'].indexOf(orf.frame);
+            const yPos = rowY + orfYOffset + (frameIndex * (orfHeight + 2));
+
+            // Color based on frame
+            const isForward = orf.strand === '+';
+            const colors = isForward
+              ? ['#3B82F6', '#60A5FA', '#93C5FD']
+              : ['#F97316', '#FB923C', '#FDBA74'];
+            const colorIndex = isForward ? frameIndex : frameIndex - 3;
+
+            const isSelected = selectedORF === idx;
+            ctx.fillStyle = isSelected ? '#4F46E5' : colors[colorIndex];
+            ctx.fillRect(startX, yPos, endX - startX, orfHeight);
+
+            // Draw amino acids inside the ORF box, aligned to codon positions
+            if (orf.aminoAcids) {
+              ctx.font = 'bold 12px monospace';
+              ctx.fillStyle = '#FFFFFF';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+
+              // Draw each amino acid at the position of the middle base of its codon
+              for (let i = 0; i < orf.aminoAcids.length; i++) {
+                const codonStartPos = orf.start + (i * 3); // Position of first base in codon
+                const middleBasePos = codonStartPos + 1;  // Position of middle base
+
+                // Check if this codon overlaps with this row
+                if (middleBasePos >= startBase && middleBasePos < endBase) {
+                  // Get peak position for the middle base
+                  const middlePeakPosition = peakLocations && peakLocations[middleBasePos]
+                    ? peakLocations[middleBasePos]
+                    : (middleBasePos * maxTraceLength / baseCalls.length);
+
+                  const x = ((middlePeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width;
+
+                  // Only draw if within canvas bounds
+                  if (x >= 0 && x <= canvas.width) {
+                    ctx.fillText(orf.aminoAcids[i], x, yPos + orfHeight / 2);
+                  }
+                }
+              }
+            }
+
+            if (isSelected) {
+              ctx.strokeStyle = '#312E81';
+              ctx.lineWidth = 2;
+              ctx.strokeRect(startX, yPos, endX - startX, orfHeight);
+            }
+          }
+        });
+      }
+
+      // Draw base calls and quality for this row
+      ctx.font = 'bold 16px monospace';
+
+      for (let i = startBase; i < endBase; i++) {
+        const peakPosition = peakLocations && peakLocations[i]
+          ? peakLocations[i]
+          : (i * maxTraceLength / baseCalls.length);
+
+        const x = ((peakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width;
+        const base = baseCalls[i];
+        const qual = quality[i] || 0;
+
+        if (x >= -20 && x <= canvas.width + 20) {
+          // Highlight selected position
+          if (selectedPosition === i) {
+            ctx.fillStyle = '#FFD700';
+            ctx.fillRect(x - 12, rowY + 5, 24, baseCallHeight - 5);
+            ctx.strokeStyle = '#FF6600';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x - 12, rowY + 5, 24, baseCallHeight - 5);
+          }
+
+          // Highlight N bases
+          if (base === 'N') {
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+            ctx.fillRect(x - 12, rowY + 5, 24, baseCallHeight - 5);
+            ctx.strokeStyle = '#FF0000';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x - 12, rowY + 5, 24, baseCallHeight - 5);
+          }
+
+          // Highlight edited positions
+          if (editedPositions.has(i)) {
+            ctx.fillStyle = 'rgba(128, 0, 255, 0.3)';
+            ctx.fillRect(x - 12, rowY + 5, 24, baseCallHeight - 5);
+            ctx.strokeStyle = '#8000FF';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x - 12, rowY + 5, 24, baseCallHeight - 5);
+          }
+
+          // Draw base letter
+          ctx.fillStyle = colors[base] || '#666666';
+          ctx.fillText(base, x - 6, rowY + baseCallHeight - 5);
+
+          // Draw quality bar
+          ctx.fillStyle = qual >= qualityThreshold ? colors[base] || '#666666' : '#CCCCCC';
+          const barHeight = (qual / 60) * 12;
+          ctx.fillRect(x - 2, baselineY + 5, 4, barHeight);
+        }
+      }
+
+      // Draw position markers for this row
+      ctx.fillStyle = '#666666';
+      ctx.font = '24px monospace';
+
+      const positionInterval = zoomLevel > 10 ? 10 : zoomLevel > 5 ? 25 : 50;
+
+      for (let pos = startBase; pos < endBase; pos += positionInterval) {
+        const peakPosition = peakLocations && peakLocations[pos]
+          ? peakLocations[pos]
+          : (pos * maxTraceLength / baseCalls.length);
+
+        const x = ((peakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width;
+
+        if (x >= 0 && x <= canvas.width) {
+          ctx.fillStyle = '#666666';
+          ctx.fillText((pos + 1).toString(), x - 10, rowY + rowHeight - 5);
+
+          ctx.strokeStyle = '#CCCCCC';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x, baselineY + 20);
+          ctx.lineTo(x, rowY + rowHeight - 15);
+          ctx.stroke();
+        }
+      }
+
+      // Draw selected position highlight line for this row
+      if (selectedPosition !== null && selectedPosition >= startBase && selectedPosition < endBase) {
+        const peakPosition = peakLocations && peakLocations[selectedPosition]
+          ? peakLocations[selectedPosition]
+          : (selectedPosition * maxTraceLength / baseCalls.length);
+
+        const selectedX = ((peakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width;
+        if (selectedX >= 0 && selectedX <= canvas.width) {
+          ctx.strokeStyle = '#FF6600';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          ctx.moveTo(selectedX, rowY + baseCallHeight);
+          ctx.lineTo(selectedX, baselineY + 20);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+
+      // Draw hover highlight for this row
+      if (hoveredPosition !== null && hoveredPosition !== selectedPosition && hoveredPosition >= startBase && hoveredPosition < endBase) {
+        const peakPosition = peakLocations && peakLocations[hoveredPosition]
+          ? peakLocations[hoveredPosition]
+          : (hoveredPosition * maxTraceLength / baseCalls.length);
+
+        const hoverX = ((peakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width;
+        if (hoverX >= 0 && hoverX <= canvas.width) {
+          ctx.fillStyle = 'rgba(173, 216, 230, 0.4)';
+          ctx.fillRect(hoverX - 12, rowY + 5, 24, baselineY + 20 - (rowY + 5));
+        }
+      }
+
+      // Draw quality threshold line for this row
+      ctx.strokeStyle = '#FF6B6B';
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      const thresholdY = baselineY + 20 + (qualityThreshold / 60) * 12;
+      ctx.moveTo(0, thresholdY);
+      ctx.lineTo(canvas.width, thresholdY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw sequence highlight for this row
+      if (showHighlight && highlightStart && highlightEnd && parsedData) {
+        const startPos = parseInt(highlightStart) - 1;
+        const endPos = parseInt(highlightEnd) - 1;
+
+        if (!isNaN(startPos) && !isNaN(endPos) && startPos >= 0 && endPos < baseCalls.length && startPos <= endPos) {
+          // Check if highlight overlaps with this row
+          if (endPos >= startBase && startPos < endBase) {
+            const rowStartPos = Math.max(startPos, startBase);
+            const rowEndPos = Math.min(endPos, endBase - 1);
+
+            const startPeakPosition = peakLocations && peakLocations[rowStartPos]
+              ? peakLocations[rowStartPos]
+              : (rowStartPos * maxTraceLength / baseCalls.length);
+            const endPeakPosition = peakLocations && peakLocations[rowEndPos]
+              ? peakLocations[rowEndPos]
+              : (rowEndPos * maxTraceLength / baseCalls.length);
+
+            const startX = Math.max(0, ((startPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width);
+            const endX = Math.min(canvas.width, ((endPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width);
+
+            ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
+            ctx.fillRect(startX - 12, rowY + 5, endX - startX + 24, baselineY + 20 - (rowY + 5));
+
+            ctx.strokeStyle = '#FFD700';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.moveTo(startX, rowY + 5);
+            ctx.lineTo(startX, baselineY + 20);
+            ctx.moveTo(endX, rowY + 5);
+            ctx.lineTo(endX, baselineY + 20);
+            ctx.stroke();
+          }
+        }
+      }
+
+      // Draw search matches for this row
+      if (searchMatches.length > 0) {
+        searchMatches.forEach((match, idx) => {
+          const startPos = match.position;
+          const endPos = match.endPosition;
+
+          // Check if match overlaps with this row
+          if (endPos >= startBase && startPos < endBase) {
+            const rowStartPos = Math.max(startPos, startBase);
+            const rowEndPos = Math.min(endPos, endBase - 1);
+
+            const startPeakPosition = peakLocations && peakLocations[rowStartPos]
+              ? peakLocations[rowStartPos]
+              : (rowStartPos * maxTraceLength / baseCalls.length);
+            const endPeakPosition = peakLocations && peakLocations[rowEndPos]
+              ? peakLocations[rowEndPos]
+              : (rowEndPos * maxTraceLength / baseCalls.length);
+
+            const startX = Math.max(0, ((startPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width);
+            const endX = Math.min(canvas.width, ((endPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width);
+
+            // Different color for current match vs other matches
+            const isCurrentMatch = idx === currentMatchIndex;
+            ctx.fillStyle = isCurrentMatch ? 'rgba(0, 255, 0, 0.3)' : 'rgba(135, 206, 250, 0.25)';
+            ctx.fillRect(startX - 12, rowY + 5, endX - startX + 24, baselineY + 20 - (rowY + 5));
+
+            // Draw border for current match
+            if (isCurrentMatch) {
+              ctx.strokeStyle = '#00AA00';
+              ctx.lineWidth = 2;
+              ctx.setLineDash([]);
+              ctx.beginPath();
+              ctx.moveTo(startX, rowY + 5);
+              ctx.lineTo(startX, baselineY + 20);
+              ctx.moveTo(endX, rowY + 5);
+              ctx.lineTo(endX, baselineY + 20);
+              ctx.stroke();
+            }
+          }
+        });
+      }
+
+      // Draw restriction enzyme cut sites for this row
+      if (showRestrictionSites && restrictionSites.length > 0) {
+        restrictionSites.forEach(site => {
+          const basePosition = site.cutPosition;
+
+          // Check if this site is in the current row
+          if (basePosition >= startBase && basePosition < endBase) {
+            const peakPosition = peakLocations && peakLocations[basePosition]
+              ? peakLocations[basePosition]
+              : (basePosition * maxTraceLength / baseCalls.length);
+
+            const x = ((peakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width;
+
+            if (x >= 0 && x <= canvas.width) {
+              // Draw purple vertical line for cut site
+              ctx.strokeStyle = '#9333EA';
+              ctx.lineWidth = 2;
+              ctx.setLineDash([]);
+              ctx.globalAlpha = 0.6;
+              ctx.beginPath();
+              ctx.moveTo(x, rowY + baseCallHeight);
+              ctx.lineTo(x, baselineY + 20);
+              ctx.stroke();
+              ctx.globalAlpha = 1.0;
+
+              // Draw enzyme name
+              ctx.fillStyle = '#9333EA';
+              ctx.font = 'bold 16px "Courier New", monospace';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'top';
+              ctx.fillText(site.enzyme, x + 4, rowY + baseCallHeight + 2);
+            }
+          }
+        });
+      }
     }
   };
 
@@ -1363,6 +2219,35 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   const handleCanvasClick = (e) => {
     if (!parsedData) return;
 
+    // CRITICAL: Time-based click blocking after touch end
+    // Prevents clicks that fire shortly after a scroll gesture
+    const timeSinceTouchEnd = performance.now() - lastTouchEndTimeRef.current;
+    const CLICK_BLOCK_WINDOW = 200; // ms - block clicks within this window after touch
+
+    if (timeSinceTouchEnd < CLICK_BLOCK_WINDOW) {
+      console.log('Click blocked: too soon after touch end', timeSinceTouchEnd + 'ms');
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
+    // CRITICAL: Prevent click if user just scrolled (touch gesture conflict resolution)
+    if (preventClickRef.current) {
+      console.log('Click blocked: was a scroll gesture');
+      preventClickRef.current = false; // Reset for next interaction
+      e.preventDefault();
+      e.stopPropagation();
+      return; // Don't process this click - it was actually a scroll
+    }
+
+    // CRITICAL: Block clicks during active touch scrolling or inertia
+    if (touchState.current.isActive || inertiaState.current.isActive) {
+      console.log('Click blocked: scroll in progress');
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
 
@@ -1374,27 +2259,43 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
 
     console.log('Click at canvas X:', canvasX, 'Y:', canvasY);
 
-    // Calculate visible range
     const traceLengths = Object.values(parsedData.traces).map(trace => trace.length);
     const maxTraceLength = Math.max(...traceLengths);
-    const dataLength = maxTraceLength;
-    const visiblePoints = Math.floor(canvas.width / zoomLevel);
-    const startIndex = Math.floor(scrollPosition * (dataLength - visiblePoints));
-    const endIndex = Math.min(startIndex + visiblePoints, dataLength);
 
-    console.log('Visible range:', startIndex, 'to', endIndex);
+    let startIndex, endIndex;
 
-    // Calculate the actual ratio for real data
-    const dataPointsPerBase = maxTraceLength / parsedData.baseCalls.length;
+    if (layoutMode === 'wrapped') {
+      // In wrapped mode, determine which row was clicked
+      const rowHeight = 200;
+      const tracePointsPerRow = Math.floor(canvas.width / zoomLevel);
+      const row = Math.floor(canvasY / rowHeight);
+
+      // Calculate the trace range for this row
+      startIndex = row * tracePointsPerRow;
+      endIndex = Math.min(startIndex + tracePointsPerRow, maxTraceLength);
+
+      console.log('Wrapped mode - Row:', row, 'Range:', startIndex, 'to', endIndex);
+    } else {
+      // Horizontal mode - use scroll position
+      const dataLength = maxTraceLength;
+      const visiblePoints = Math.floor(canvas.width / zoomLevel);
+      startIndex = Math.floor(scrollPosition * (dataLength - visiblePoints));
+      endIndex = Math.min(startIndex + visiblePoints, dataLength);
+
+      console.log('Horizontal mode - Visible range:', startIndex, 'to', endIndex);
+    }
 
     // Find the closest base call position
     let closestPosition = null;
     let closestDistance = Infinity;
 
-    for (let i = 0; i < parsedData.baseCalls.length; i++) {
-      const peakPosition = parsedData.peakLocations && parsedData.peakLocations[i]
-        ? parsedData.peakLocations[i]
-        : (i * maxTraceLength / parsedData.baseCalls.length);
+    // Use display data (forward or reverse complement)
+    const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
+
+    for (let i = 0; i < displayData.baseCalls.length; i++) {
+      const peakPosition = displayData.peakLocations && displayData.peakLocations[i]
+        ? displayData.peakLocations[i]
+        : (i * maxTraceLength / displayData.baseCalls.length);
 
       if (peakPosition < startIndex || peakPosition > endIndex) continue;
 
@@ -1410,7 +2311,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     console.log('Closest position:', closestPosition, 'Distance:', closestDistance);
 
     if (closestPosition !== null && closestDistance < 50 && closestPosition >= 0) {
-      const nucleotide = parsedData.baseCalls[closestPosition];
+      const nucleotide = displayData.baseCalls[closestPosition];
       setSelectedPosition(closestPosition);
       setSelectedNucleotide(nucleotide);
       console.log(`Selected: ${nucleotide}${closestPosition + 1}`);
@@ -1425,31 +2326,59 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   const handleCanvasMouseMove = (e) => {
     if (!parsedData) return;
 
+    // CRITICAL: Skip hover updates during active touch scrolling only
+    // (not during inertia - we want hover to work when user moves mouse)
+    if (touchState.current.isActive) {
+      return;
+    }
+
+    // Also skip if this is a touch-generated mouse event (some browsers do this)
+    if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) {
+      return;
+    }
+
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
 
     const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
     const canvasX = (e.clientX - rect.left) * scaleX;
+    const canvasY = (e.clientY - rect.top) * scaleY;
 
-    // Calculate visible range
     const traceLengths = Object.values(parsedData.traces).map(trace => trace.length);
     const maxTraceLength = Math.max(...traceLengths);
-    const dataLength = maxTraceLength;
-    const visiblePoints = Math.floor(canvas.width / zoomLevel);
-    const startIndex = Math.floor(scrollPosition * (dataLength - visiblePoints));
-    const endIndex = Math.min(startIndex + visiblePoints, dataLength);
 
-    // Calculate the actual ratio for real data
-    const dataPointsPerBase = maxTraceLength / parsedData.baseCalls.length;
+    let startIndex, endIndex;
+
+    if (layoutMode === 'wrapped') {
+      // In wrapped mode, determine which row was hovered
+      const rowHeight = 200;
+      const tracePointsPerRow = Math.floor(canvas.width / zoomLevel);
+      const row = Math.floor(canvasY / rowHeight);
+
+      // Calculate the trace range for this row
+      startIndex = row * tracePointsPerRow;
+      endIndex = Math.min(startIndex + tracePointsPerRow, maxTraceLength);
+    } else {
+      // Horizontal mode - use scrollOffsetRef during inertia, otherwise use React state
+      const currentScrollPos = inertiaState.current.isActive ? scrollOffsetRef.current : scrollPosition;
+      const dataLength = maxTraceLength;
+      const visiblePoints = Math.floor(canvas.width / zoomLevel);
+      startIndex = Math.floor(currentScrollPos * (dataLength - visiblePoints));
+      endIndex = Math.min(startIndex + visiblePoints, dataLength);
+    }
 
     // Find closest position
     let closestPosition = null;
     let closestDistance = Infinity;
 
-    for (let i = 0; i < parsedData.baseCalls.length; i++) {
-      const peakPosition = parsedData.peakLocations && parsedData.peakLocations[i]
-        ? parsedData.peakLocations[i]
-        : (i * maxTraceLength / parsedData.baseCalls.length);
+    // Use display data (forward or reverse complement)
+    const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
+
+    for (let i = 0; i < displayData.baseCalls.length; i++) {
+      const peakPosition = displayData.peakLocations && displayData.peakLocations[i]
+        ? displayData.peakLocations[i]
+        : (i * maxTraceLength / displayData.baseCalls.length);
 
       if (peakPosition < startIndex || peakPosition > endIndex) continue;
 
@@ -1475,16 +2404,277 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   };
 
   const handleScrollbarChange = (e) => {
+    // Stop any ongoing inertia
+    stopInertia();
+
     const newPosition = parseFloat(e.target.value) / 10000;
+    scrollOffsetRef.current = newPosition;
     setScrollPosition(newPosition);
   };
 
   const resetView = () => {
+    // Stop any ongoing inertia
+    stopInertia();
+
     setZoomLevel(2.5);
+    scrollOffsetRef.current = 0;
     setScrollPosition(0);
     // Clear selection when resetting view
     setSelectedPosition(null);
     setSelectedNucleotide(null);
+  };
+
+  // Reverse complement helper functions
+  const getComplement = (base) => {
+    const complements = { 'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N' };
+    return complements[base.toUpperCase()] || base;
+  };
+
+  // Translate codon to amino acid (single letter code)
+  const translateCodon = (codon) => {
+    const codonTable = {
+      'TTT': 'F', 'TTC': 'F', 'TTA': 'L', 'TTG': 'L',
+      'TCT': 'S', 'TCC': 'S', 'TCA': 'S', 'TCG': 'S',
+      'TAT': 'Y', 'TAC': 'Y', 'TAA': '*', 'TAG': '*',
+      'TGT': 'C', 'TGC': 'C', 'TGA': '*', 'TGG': 'W',
+      'CTT': 'L', 'CTC': 'L', 'CTA': 'L', 'CTG': 'L',
+      'CCT': 'P', 'CCC': 'P', 'CCA': 'P', 'CCG': 'P',
+      'CAT': 'H', 'CAC': 'H', 'CAA': 'Q', 'CAG': 'Q',
+      'CGT': 'R', 'CGC': 'R', 'CGA': 'R', 'CGG': 'R',
+      'ATT': 'I', 'ATC': 'I', 'ATA': 'I', 'ATG': 'M',
+      'ACT': 'T', 'ACC': 'T', 'ACA': 'T', 'ACG': 'T',
+      'AAT': 'N', 'AAC': 'N', 'AAA': 'K', 'AAG': 'K',
+      'AGT': 'S', 'AGC': 'S', 'AGA': 'R', 'AGG': 'R',
+      'GTT': 'V', 'GTC': 'V', 'GTA': 'V', 'GTG': 'V',
+      'GCT': 'A', 'GCC': 'A', 'GCA': 'A', 'GCG': 'A',
+      'GAT': 'D', 'GAC': 'D', 'GAA': 'E', 'GAG': 'E',
+      'GGT': 'G', 'GGC': 'G', 'GGA': 'G', 'GGG': 'G'
+    };
+    return codonTable[codon.toUpperCase()] || 'X';
+  };
+
+  // Translate nucleotide sequence to amino acids
+  const translateSequence = (sequence) => {
+    const aa = [];
+    for (let i = 0; i < sequence.length - 2; i += 3) {
+      const codon = sequence.substring(i, i + 3);
+      aa.push(translateCodon(codon));
+    }
+    return aa.join('');
+  };
+
+  // IUPAC nucleotide code matching
+  const iupacMatch = (base, pattern) => {
+    const iupacCodes = {
+      'A': ['A'],
+      'T': ['T'],
+      'G': ['G'],
+      'C': ['C'],
+      'R': ['A', 'G'],      // puRine
+      'Y': ['C', 'T'],      // pYrimidine
+      'S': ['G', 'C'],      // Strong
+      'W': ['A', 'T'],      // Weak
+      'K': ['G', 'T'],      // Keto
+      'M': ['A', 'C'],      // aMino
+      'B': ['C', 'G', 'T'], // not A
+      'D': ['A', 'G', 'T'], // not C
+      'H': ['A', 'C', 'T'], // not G
+      'V': ['A', 'C', 'G'], // not T
+      'N': ['A', 'C', 'G', 'T'] // aNy
+    };
+
+    const patternUpper = pattern.toUpperCase();
+    const baseUpper = base.toUpperCase();
+
+    if (!iupacCodes[patternUpper]) return false;
+    return iupacCodes[patternUpper].includes(baseUpper);
+  };
+
+  // Search for sequence pattern with IUPAC support
+  const searchSequence = useCallback((sequence, query) => {
+    if (!sequence || !query || query.length === 0) return [];
+
+    const matches = [];
+    const queryUpper = query.toUpperCase();
+
+    for (let i = 0; i <= sequence.length - query.length; i++) {
+      let isMatch = true;
+
+      for (let j = 0; j < query.length; j++) {
+        if (!iupacMatch(sequence[i + j], queryUpper[j])) {
+          isMatch = false;
+          break;
+        }
+      }
+
+      if (isMatch) {
+        matches.push({
+          position: i,
+          endPosition: i + query.length - 1,
+          matchedSequence: sequence.substring(i, i + query.length)
+        });
+      }
+    }
+
+    return matches;
+  }, []);
+
+  // Effect to perform search when query or data changes
+  useEffect(() => {
+    if (parsedData && searchQuery.trim().length > 0) {
+      const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
+      const matches = searchSequence(displayData.sequence, searchQuery);
+      setSearchMatches(matches);
+      setCurrentMatchIndex(0);
+    } else {
+      setSearchMatches([]);
+      setCurrentMatchIndex(0);
+    }
+  }, [parsedData, searchQuery, showReverseComplement, searchSequence]);
+
+  // ORF Detection
+  const findORFs = useCallback((sequence, frames, minLength) => {
+    if (!sequence || sequence.length < 3) return [];
+
+    const startCodons = ['ATG'];
+    const stopCodons = ['TAA', 'TAG', 'TGA'];
+    const orfs = [];
+
+    // Process each frame
+    frames.forEach(frame => {
+      const isForward = frame.startsWith('+');
+      const frameNum = parseInt(frame.replace(/[+-]/, ''));
+      const offset = frameNum - 1; // Convert to 0-indexed
+
+      let seq = sequence;
+
+      // For reverse frames, use reverse complement
+      if (!isForward) {
+        seq = [...sequence].reverse().map(base => {
+          const comp = { 'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N' };
+          return comp[base.toUpperCase()] || base;
+        }).join('');
+      }
+
+      // Scan through the sequence in this frame
+      for (let i = offset; i < seq.length - 2; i += 3) {
+        const codon = seq.substring(i, i + 3);
+
+        if (startCodons.includes(codon)) {
+          // Found a start codon, look for stop codon
+          let j = i + 3;
+          let foundStop = false;
+
+          while (j < seq.length - 2) {
+            const stopCodon = seq.substring(j, j + 3);
+
+            if (stopCodons.includes(stopCodon)) {
+              foundStop = true;
+              const orfLength = j + 3 - i;
+
+              if (orfLength >= minLength) {
+                const orfSeq = seq.substring(i, j + 3);
+
+                // Convert positions back to original sequence coordinates
+                let startPos, endPos;
+                if (isForward) {
+                  startPos = i;
+                  endPos = j + 2;
+                } else {
+                  // Reverse frame positions need to be flipped
+                  startPos = sequence.length - (j + 3);
+                  endPos = sequence.length - i - 1;
+                }
+
+                // Translate to amino acids
+                const aaSeq = translateSequence(orfSeq);
+
+                orfs.push({
+                  frame,
+                  start: startPos,
+                  end: endPos,
+                  length: orfLength,
+                  lengthAA: Math.floor(orfLength / 3),
+                  sequence: orfSeq,
+                  aminoAcids: aaSeq,
+                  strand: isForward ? '+' : '-'
+                });
+              }
+              break;
+            }
+            j += 3;
+          }
+
+          // If we found a stop, skip past it to look for next ORF
+          if (foundStop) {
+            i = j;
+          }
+        }
+      }
+    });
+
+    return orfs;
+  }, []);
+
+  // Effect to detect ORFs when sequence or settings change
+  useEffect(() => {
+    if (parsedData && selectedFrames.length > 0) {
+      const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
+      const orfs = findORFs(displayData.sequence, selectedFrames, minORFLength);
+      setDetectedORFs(orfs);
+    } else {
+      setDetectedORFs([]);
+    }
+  }, [parsedData, selectedFrames, minORFLength, showReverseComplement, findORFs]);
+
+  // Force render after ORFs/RE sites are computed (critical for mobile)
+  useEffect(() => {
+    if (parsedData && canvasRef.current && (detectedORFs.length > 0 || restrictionSites.length > 0)) {
+      // Extra RAF to ensure state has fully propagated on mobile
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (canvasRef.current) {
+            drawChromatogram();
+          }
+        });
+      });
+    }
+  }, [detectedORFs, restrictionSites]);
+
+  const getReverseComplementData = (data) => {
+    if (!data) return null;
+
+    // Reverse and complement the sequence
+    const reversedBaseCalls = [...data.baseCalls].reverse().map(getComplement);
+    const reversedSequence = reversedBaseCalls.join('');
+
+    // Reverse the trace data
+    const reversedTraces = {
+      A: [...data.traces.T].reverse(), // A↔T
+      T: [...data.traces.A].reverse(), // T↔A
+      G: [...data.traces.C].reverse(), // G↔C
+      C: [...data.traces.G].reverse(), // C↔G
+    };
+
+    // Reverse quality scores
+    const reversedQuality = data.quality ? [...data.quality].reverse() : [];
+
+    // Reverse peak locations and adjust positions
+    const reversedPeakLocations = data.peakLocations
+      ? [...data.peakLocations].reverse().map((peak) => {
+          const maxTraceLength = Math.max(...Object.values(data.traces).map(t => t.length));
+          return maxTraceLength - peak;
+        })
+      : [];
+
+    return {
+      ...data,
+      baseCalls: reversedBaseCalls,
+      sequence: reversedSequence,
+      traces: reversedTraces,
+      quality: reversedQuality,
+      peakLocations: reversedPeakLocations,
+    };
   };
 
   const toggleChannel = (channel) => {
@@ -1497,12 +2687,16 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   const exportSequence = () => {
     if (!parsedData) return;
 
-    const fasta = `>${fileName}\n${parsedData.sequence}`;
+    // Export the currently displayed sequence (forward or reverse complement)
+    const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
+    const header = showReverseComplement ? `${fileName} (reverse complement)` : fileName;
+    const fasta = `>${header}\n${displayData.sequence}`;
     const blob = new Blob([fasta], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
+    const suffix = showReverseComplement ? '_rc' : '';
     a.href = url;
-    a.download = `${fileName.replace('.ab1', '')}.fasta`;
+    a.download = `${fileName.replace(/\.(ab1|scf)$/i, '')}${suffix}.fasta`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -1617,28 +2811,6 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
           <div className="mb-4 pb-4 border-b border-gray-200">
             <h4 className="text-sm font-semibold text-gray-700 mb-1">File</h4>
             <p className="text-xs text-gray-600 break-all">{fileName || 'Chromatogram'}</p>
-          </div>
-
-          {/* Zoom Controls */}
-          <div className="mb-4 pb-4 border-b border-gray-200">
-            <h4 className="text-sm font-semibold text-gray-700 mb-2">Zoom</h4>
-            <div className="flex items-center justify-center space-x-3">
-              <button
-                onClick={() => handleZoom(-0.5)}
-                className="p-2 border border-gray-300 rounded hover:bg-gray-100"
-              >
-                <ZoomOut className="w-5 h-5" />
-              </button>
-              <span className="text-lg font-medium text-gray-700 min-w-[4rem] text-center">
-                {zoomLevel.toFixed(1)}x
-              </span>
-              <button
-                onClick={() => handleZoom(0.5)}
-                className="p-2 border border-gray-300 rounded hover:bg-gray-100"
-              >
-                <ZoomIn className="w-5 h-5" />
-              </button>
-            </div>
           </div>
 
           {/* Selected Position */}
@@ -1833,8 +3005,108 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
             )}
           </div>
 
+          {/* ORF Finder */}
+          <div className="mb-4 pb-4 border-b border-gray-200">
+            <h4 className="text-sm font-semibold text-gray-700 mb-2">Open Reading Frames</h4>
+
+            {/* Frame selection */}
+            <div className="mb-2">
+              <p className="text-xs text-gray-500 mb-2">Frames:</p>
+              <div className="flex flex-wrap gap-1">
+                {['+1', '+2', '+3', '-1', '-2', '-3'].map(frame => (
+                  <button
+                    key={frame}
+                    onClick={() => {
+                      if (selectedFrames.includes(frame)) {
+                        setSelectedFrames(selectedFrames.filter(f => f !== frame));
+                      } else {
+                        setSelectedFrames([...selectedFrames, frame]);
+                      }
+                    }}
+                    className={`px-2 py-1 text-xs rounded ${
+                      selectedFrames.includes(frame)
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    {frame}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Min length slider */}
+            <div className="mb-2">
+              <label className="text-xs text-gray-600 flex justify-between">
+                <span>Min Length:</span>
+                <span className="font-medium">{minORFLength} bp (~{Math.floor(minORFLength / 3)} aa)</span>
+              </label>
+              <input
+                type="range"
+                min="30"
+                max="300"
+                step="30"
+                value={minORFLength}
+                onChange={(e) => setMinORFLength(parseInt(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+
+            {/* Show/hide toggle and count */}
+            <div className="flex items-center justify-between mb-2">
+              <button
+                onClick={() => setShowORFs(!showORFs)}
+                disabled={detectedORFs.length === 0}
+                className={`px-3 py-1 text-sm rounded ${
+                  showORFs
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-white text-indigo-700 border border-indigo-300'
+                } disabled:opacity-50`}
+              >
+                {showORFs ? 'Hide ORFs' : 'Show ORFs'}
+              </button>
+              <span className="text-xs text-gray-600">
+                {detectedORFs.length} ORF{detectedORFs.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+
+            {/* Found ORFs list */}
+            {detectedORFs.length > 0 && (
+              <div className="max-h-40 overflow-y-auto border border-gray-200 rounded p-2 bg-gray-50">
+                {detectedORFs.map((orf, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => setSelectedORF(selectedORF === idx ? null : idx)}
+                    className={`text-xs py-1 px-2 mb-1 border-b border-gray-200 last:border-0 cursor-pointer rounded ${
+                      selectedORF === idx ? 'bg-indigo-100' : 'hover:bg-gray-100'
+                    }`}
+                  >
+                    <div className="flex justify-between">
+                      <span className="font-medium text-indigo-700">{orf.frame}</span>
+                      <span className="text-gray-600">{orf.lengthAA} aa</span>
+                    </div>
+                    <div className="text-[10px] text-gray-500">
+                      {orf.start + 1}..{orf.end + 1} ({orf.length} bp)
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Actions */}
           <div className="space-y-2">
+            <button
+              onClick={() => setShowReverseComplement(!showReverseComplement)}
+              className={`w-full px-3 py-2 text-sm rounded hover:opacity-90 flex items-center justify-center space-x-2 ${
+                showReverseComplement
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-blue-700 border-2 border-blue-600'
+              }`}
+            >
+              <Repeat2 className="w-4 h-4" />
+              <span>{showReverseComplement ? 'Show Forward' : 'Reverse Complement'}</span>
+            </button>
             <button
               onClick={exportSequence}
               className="w-full px-3 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700 flex items-center justify-center space-x-2"
@@ -1872,31 +3144,121 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
           {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
 
+        {/* Layout Mode Toggle and Zoom Controls */}
+        <div className="absolute top-1 left-14 z-10 bg-white rounded-lg shadow-lg px-3 py-2 flex items-center space-x-4">
+          {/* Layout Toggle */}
+          <div className="flex items-center space-x-2">
+            <span className="text-xs font-medium text-gray-700">Layout:</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={layoutMode === 'wrapped'}
+                onChange={() => setLayoutMode(layoutMode === 'horizontal' ? 'wrapped' : 'horizontal')}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-teal-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
+            </label>
+            <span className="text-xs font-medium text-gray-700">
+              {layoutMode === 'horizontal' ? 'Scroll' : 'Wrap'}
+            </span>
+          </div>
+
+          {/* Divider */}
+          <div className="h-6 w-px bg-gray-300"></div>
+
+          {/* Zoom Controls */}
+          <div className="flex items-center space-x-2">
+            <span className="text-xs font-medium text-gray-700">Zoom:</span>
+            <button
+              onClick={() => handleZoom(-0.5)}
+              className="p-1 border border-gray-300 rounded hover:bg-gray-100"
+            >
+              <ZoomOut className="w-4 h-4" />
+            </button>
+            <span className="text-sm font-medium text-gray-700 min-w-[3rem] text-center">
+              {zoomLevel.toFixed(1)}x
+            </span>
+            <button
+              onClick={() => handleZoom(0.5)}
+              className="p-1 border border-gray-300 rounded hover:bg-gray-100"
+            >
+              <ZoomIn className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Divider */}
+          <div className="h-6 w-px bg-gray-300"></div>
+
+          {/* Sequence Search */}
+          <div className="flex items-center space-x-2">
+            <span className="text-xs font-medium text-gray-700">Search:</span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
+              placeholder="ATGC, IUPAC..."
+              className="px-2 py-1 text-xs border border-gray-300 rounded w-32 uppercase"
+            />
+            {searchMatches.length > 0 && (
+              <>
+                <span className="text-xs text-gray-600">
+                  {currentMatchIndex + 1}/{searchMatches.length}
+                </span>
+                <button
+                  onClick={() => {
+                    const newIndex = (currentMatchIndex - 1 + searchMatches.length) % searchMatches.length;
+                    setCurrentMatchIndex(newIndex);
+                  }}
+                  className="p-1 border border-gray-300 rounded hover:bg-gray-100 text-xs"
+                  title="Previous match"
+                >
+                  ◀
+                </button>
+                <button
+                  onClick={() => {
+                    const newIndex = (currentMatchIndex + 1) % searchMatches.length;
+                    setCurrentMatchIndex(newIndex);
+                  }}
+                  className="p-1 border border-gray-300 rounded hover:bg-gray-100 text-xs"
+                  title="Next match"
+                >
+                  ▶
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
         {/* Canvas - adjusted padding to not overlap with scrollbar */}
-        <div className="absolute top-0 left-0 right-0 bottom-10 p-1 pt-12">
+        <div className={`absolute top-0 left-0 right-0 ${layoutMode === 'horizontal' ? 'bottom-10' : 'bottom-0'} p-1 pt-12 ${layoutMode === 'wrapped' ? 'overflow-y-auto' : ''}`}>
           <canvas
             ref={canvasRef}
             onClick={handleCanvasClick}
             onDoubleClick={handleNavigation}
             onMouseMove={handleCanvasMouseMove}
             onMouseLeave={handleCanvasMouseLeave}
-            className="w-full h-full border border-gray-200 rounded cursor-pointer"
-            style={{ touchAction: 'none' }}
+            className={`w-full border border-gray-200 rounded cursor-pointer ${layoutMode === 'horizontal' ? 'h-full' : ''}`}
+            style={{
+              touchAction: layoutMode === 'wrapped' ? 'auto' : 'none',
+              display: 'block',
+              willChange: 'contents'
+            }}
           />
         </div>
 
-        {/* Bottom Scrollbar */}
+        {/* Bottom Scrollbar - only show in horizontal mode */}
+        {layoutMode === 'horizontal' && (
         <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-2 py-1">
           <div className="flex items-center space-x-2">
             <input
               type="range"
               min="0"
               max="10000"
-              value={scrollPosition * 10000}
+              value={((touchState.current.isActive || inertiaState.current.isActive) ? scrollOffsetRef.current : scrollPosition) * 10000}
               onChange={handleScrollbarChange}
               className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
               style={{
-                background: `linear-gradient(to right, #0d9488 0%, #0d9488 ${scrollPosition * 100}%, #E5E7EB ${scrollPosition * 100}%, #E5E7EB 100%)`
+                background: `linear-gradient(to right, #0d9488 0%, #0d9488 ${((touchState.current.isActive || inertiaState.current.isActive) ? scrollOffsetRef.current : scrollPosition) * 100}%, #E5E7EB ${((touchState.current.isActive || inertiaState.current.isActive) ? scrollOffsetRef.current : scrollPosition) * 100}%, #E5E7EB 100%)`
               }}
             />
             <span className="text-xs text-gray-600 whitespace-nowrap">
@@ -1925,6 +3287,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
             </span>
           </div>
         </div>
+        )}
       </div>
     </div>
   );

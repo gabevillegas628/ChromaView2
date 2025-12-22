@@ -1,0 +1,293 @@
+Error: Can't find the actor ID for objects-manager from root or target actor's form. types.js:559:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Click at canvas X: 834.649063032368 Y: 235.59183673469389 ChromatogramViewer.jsx:1608:13
+Horizontal mode - Visible range: 0 to 788 ChromatogramViewer.jsx:1624:15
+Closest position: 44 Distance: 0.8509369676320375 ChromatogramViewer.jsx:1639:13
+Selected: T45 ChromatogramViewer.jsx:1644:15
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+Touch end - samples: 5 recent: 3 ChromatogramViewer.jsx:343:13
+Avg velocity: 3.007230392156863 abs: 3.007230392156863 ChromatogramViewer.jsx:346:15
+Starting inertia with velocity: 2 ChromatogramViewer.jsx:351:17
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://play.google.com/log?format=json&hasfast=true&authuser=1. (Reason: CORS request did not succeed). Status code: (null).
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+Touch end - samples: 5 recent: 3 ChromatogramViewer.jsx:343:13
+Avg velocity: 3.13362381989833 abs: 3.13362381989833 ChromatogramViewer.jsx:346:15
+Starting inertia with velocity: 2 ChromatogramViewer.jsx:351:17
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://play.google.com/log?format=json&hasfast=true&authuser=1. (Reason: CORS request did not succeed). Status code: (null).
+Touch end - samples: 5 recent: 3 ChromatogramViewer.jsx:343:13
+Avg velocity: 2.03076988371106 abs: 2.03076988371106 ChromatogramViewer.jsx:346:15
+Starting inertia with velocity: 2 ChromatogramViewer.jsx:351:17
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+ChromatogramViewer props: 
+Object { fileData: Uint8Array(297162), fileName: "WA31AZ4.25(1).ab1" }
+ChromatogramViewer.jsx:23:11
+Warning: Encountered two children with the same key, `SbfI`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+div
+div
+details
+div
+div
+div
+div
+ChromatogramViewer@http://localhost:3000/src/components/ChromatogramViewer.jsx?t=1766438295673:21:28
+div
+div
+App@http://localhost:3000/src/App.jsx?t=1766438149716:25:43 chunk-PJEEZAML.js:521:38
+Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://play.google.com/log?format=json&hasfast=true&authuser=1. (Reason: CORS request did not succeed). Status code: (null).
