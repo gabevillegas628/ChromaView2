@@ -1,122 +1,68 @@
 [
   {
-    "name": "EcoRI",
-    "site": "GAATTC",
-    "cut": 1,
-    "type": "Type II"
-  },
-  {
-    "name": "BamHI",
-    "site": "GGATCC",
-    "cut": 1,
-    "type": "Type II"
-  },
-  {
-    "name": "HindIII",
-    "site": "AAGCTT",
-    "cut": 1,
-    "type": "Type II"
-  },
-  {
-    "name": "PstI",
-    "site": "CTGCAG",
+    "name": "AatII",
+    "site": "GACGTC",
     "cut": 5,
     "type": "Type II"
   },
   {
-    "name": "SacI",
-    "site": "GAGCTC",
-    "cut": 5,
-    "type": "Type II"
-  },
-  {
-    "name": "SalI",
-    "site": "GTCGAC",
-    "cut": 1,
-    "type": "Type II"
-  },
-  {
-    "name": "XbaI",
-    "site": "TCTAGA",
-    "cut": 1,
-    "type": "Type II"
-  },
-  {
-    "name": "XhoI",
-    "site": "CTCGAG",
-    "cut": 1,
-    "type": "Type II"
-  },
-  {
-    "name": "NotI",
-    "site": "GCGGCCGC",
+    "name": "AccI",
+    "site": "GTMKAC",
     "cut": 2,
     "type": "Type II"
   },
   {
-    "name": "SpeI",
-    "site": "ACTAGT",
+    "name": "AccIII",
+    "site": "TCCGGA",
     "cut": 1,
     "type": "Type II"
   },
   {
-    "name": "KpnI",
-    "site": "GGTACC",
-    "cut": 5,
-    "type": "Type II"
-  },
-  {
-    "name": "SmaI",
-    "site": "CCCGGG",
-    "cut": 3,
-    "type": "Type II"
-  },
-  {
-    "name": "NcoI",
-    "site": "CCATGG",
+    "name": "AciI",
+    "site": "CCGC",
     "cut": 1,
     "type": "Type II"
   },
   {
-    "name": "NdeI",
-    "site": "CATATG",
+    "name": "AclI",
+    "site": "AACGTT",
     "cut": 2,
     "type": "Type II"
   },
   {
-    "name": "NheI",
-    "site": "GCTAGC",
+    "name": "AfeI",
+    "site": "AGCGCT",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "AflII",
+    "site": "CTTAAG",
     "cut": 1,
     "type": "Type II"
   },
   {
-    "name": "PvuI",
-    "site": "CGATCG",
-    "cut": 4,
+    "name": "AflIII",
+    "site": "ACRYGT",
+    "cut": 1,
     "type": "Type II"
   },
   {
-    "name": "PvuII",
-    "site": "CAGCTG",
-    "cut": 3,
+    "name": "AgeI",
+    "site": "ACCGGT",
+    "cut": 1,
     "type": "Type II"
   },
   {
-    "name": "ScaI",
-    "site": "AGTACT",
-    "cut": 3,
+    "name": "AluI",
+    "site": "AGCT",
+    "cut": 2,
     "type": "Type II"
   },
   {
-    "name": "SphI",
-    "site": "GCATGC",
-    "cut": 5,
-    "type": "Type II"
-  },
-  {
-    "name": "StuI",
-    "site": "AGGCCT",
-    "cut": 3,
+    "name": "AlwNI",
+    "site": "CAGNNNCTG",
+    "cut": 6,
     "type": "Type II"
   },
   {
@@ -126,56 +72,14 @@
     "type": "Type II"
   },
   {
-    "name": "AvrII",
-    "site": "CCTAGG",
+    "name": "ApaLI",
+    "site": "GTGCAC",
     "cut": 1,
     "type": "Type II"
   },
   {
-    "name": "BglII",
-    "site": "AGATCT",
-    "cut": 1,
-    "type": "Type II"
-  },
-  {
-    "name": "ClaI",
-    "site": "ATCGAT",
-    "cut": 2,
-    "type": "Type II"
-  },
-  {
-    "name": "EcoRV",
-    "site": "GATATC",
-    "cut": 3,
-    "type": "Type II"
-  },
-  {
-    "name": "HpaI",
-    "site": "GTTAAC",
-    "cut": 3,
-    "type": "Type II"
-  },
-  {
-    "name": "MluI",
-    "site": "ACGCGT",
-    "cut": 1,
-    "type": "Type II"
-  },
-  {
-    "name": "NsiI",
-    "site": "ATGCAT",
-    "cut": 5,
-    "type": "Type II"
-  },
-  {
-    "name": "SbfI",
-    "site": "CCTGCAGG",
-    "cut": 6,
-    "type": "Type II"
-  },
-  {
-    "name": "AgeI",
-    "site": "ACCGGT",
+    "name": "ApoI",
+    "site": "RAATTY",
     "cut": 1,
     "type": "Type II"
   },
@@ -186,44 +90,230 @@
     "type": "Type II"
   },
   {
-    "name": "BsrGI",
-    "site": "TGTACA",
-    "cut": 1,
+    "name": "AseI",
+    "site": "ATTAAT",
+    "cut": 2,
     "type": "Type II"
   },
   {
-    "name": "FseI",
-    "site": "GGCCGGCC",
-    "cut": 6,
-    "type": "Type II"
-  },
-  {
-    "name": "PacI",
-    "site": "TTAATTAA",
+    "name": "AsiSI",
+    "site": "GCGATCGC",
     "cut": 5,
     "type": "Type II"
   },
   {
-    "name": "PmeI",
-    "site": "GTTTAAAC",
+    "name": "AvaI",
+    "site": "CYCGRG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "AvaII",
+    "site": "GGWCC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "AvrII",
+    "site": "CCTAGG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BaeI",
+    "site": "ACNNNNGTAYC",
+    "cut": 7,
+    "type": "Type II"
+  },
+  {
+    "name": "BalI",
+    "site": "TGGCCA",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "BamHI",
+    "site": "GGATCC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BanI",
+    "site": "GGYRCC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BanII",
+    "site": "GRGCYC",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "BbsI",
+    "site": "GAAGAC",
+    "cut": 2,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BbvCI",
+    "site": "CCTCAGC",
+    "cut": 2,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BccI",
+    "site": "CCATC",
     "cut": 4,
     "type": "Type II"
   },
   {
-    "name": "SbfI",
-    "site": "CCTGCAGG",
+    "name": "BceAI",
+    "site": "ACGGC",
+    "cut": 2,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BciVI",
+    "site": "GTATCC",
     "cut": 6,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BclI",
+    "site": "TGATCA",
+    "cut": 1,
     "type": "Type II"
   },
   {
-    "name": "SwaI",
-    "site": "ATTTAAAT",
-    "cut": 4,
+    "name": "BfaI",
+    "site": "CTAG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BglI",
+    "site": "GCCNNNNNGGC",
+    "cut": 7,
+    "type": "Type II"
+  },
+  {
+    "name": "BglII",
+    "site": "AGATCT",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BlpI",
+    "site": "GCTNAGC",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "BmgBI",
+    "site": "CACGTC",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "BmrI",
+    "site": "ACTGGG",
+    "cut": 5,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BmtI",
+    "site": "GCTAGC",
+    "cut": 5,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BsaAI",
+    "site": "YACGTR",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "BsaBI",
+    "site": "GATNNNATC",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "BsaHI",
+    "site": "GRCGYC",
+    "cut": 2,
     "type": "Type II"
   },
   {
     "name": "BsaI",
     "site": "GGTCTC",
+    "cut": 1,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BsaJI",
+    "site": "CCNNGG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BsaWI",
+    "site": "WCCGGW",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BsaXI",
+    "site": "ACNNNNNCTCC",
+    "cut": 7,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BseRI",
+    "site": "GAGGAG",
+    "cut": 2,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BseYI",
+    "site": "CCCAGC",
+    "cut": 1,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BsgI",
+    "site": "GTGCAG",
+    "cut": 2,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BsiEI",
+    "site": "CGRYCG",
+    "cut": 4,
+    "type": "Type II"
+  },
+  {
+    "name": "BsiHKAI",
+    "site": "GWGCWC",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "BsiWI",
+    "site": "CGTACG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BslI",
+    "site": "CCNNNNNNNGG",
+    "cut": 7,
+    "type": "Type II"
+  },
+  {
+    "name": "BsmAI",
+    "site": "GTCTC",
     "cut": 1,
     "type": "Type IIS"
   },
@@ -234,39 +324,111 @@
     "type": "Type IIS"
   },
   {
-    "name": "SfiI",
-    "site": "GGCCNNNNNGGCC",
-    "cut": 8,
-    "type": "Type II"
+    "name": "BsmFI",
+    "site": "GGGAC",
+    "cut": 2,
+    "type": "Type IIS"
   },
   {
-    "name": "HinfI",
-    "site": "GANTC",
+    "name": "BsmI",
+    "site": "GAATGC",
+    "cut": 1,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BsoBI",
+    "site": "CYCGRG",
     "cut": 1,
     "type": "Type II"
   },
   {
-    "name": "MboI",
-    "site": "GATC",
-    "cut": 0,
+    "name": "Bsp1286I",
+    "site": "GDGCHC",
+    "cut": 5,
     "type": "Type II"
   },
   {
-    "name": "Sau3AI",
-    "site": "GATC",
-    "cut": 0,
-    "type": "Type II"
+    "name": "BspCNI",
+    "site": "CTCAG",
+    "cut": 2,
+    "type": "Type IIS"
   },
   {
-    "name": "AluI",
-    "site": "AGCT",
+    "name": "BspDI",
+    "site": "ATCGAT",
     "cut": 2,
     "type": "Type II"
   },
   {
-    "name": "DpnI",
-    "site": "GATC",
-    "cut": 0,
+    "name": "BspEI",
+    "site": "TCCGGA",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BspHI",
+    "site": "TCATGA",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BspMI",
+    "site": "ACCTGC",
+    "cut": 4,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BspQI",
+    "site": "GCTCTTC",
+    "cut": 1,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BsrBI",
+    "site": "CCGCTC",
+    "cut": 3,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BsrDI",
+    "site": "GCAATG",
+    "cut": 2,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BsrFI",
+    "site": "RCCGGY",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BsrGI",
+    "site": "TGTACA",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BsrI",
+    "site": "ACTGG",
+    "cut": 1,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BssHII",
+    "site": "GCGCGC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BssSI",
+    "site": "CACGAG",
+    "cut": 1,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BstAPI",
+    "site": "GCANNNNNTGC",
+    "cut": 7,
     "type": "Type II"
   },
   {
@@ -282,9 +444,417 @@
     "type": "Type II"
   },
   {
+    "name": "BstNI",
+    "site": "CCWGG",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "BstUI",
+    "site": "CGCG",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "BstXI",
+    "site": "CCANNNNNNTGG",
+    "cut": 8,
+    "type": "Type II"
+  },
+  {
+    "name": "BstYI",
+    "site": "RGATCY",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BstZ17I",
+    "site": "GTATAC",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "Bsu36I",
+    "site": "CCTNAGG",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "BtgI",
+    "site": "CCRYGG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "BtgZI",
+    "site": "GCGATG",
+    "cut": 2,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BtsCI",
+    "site": "GGATG",
+    "cut": 2,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BtsI",
+    "site": "GCAGTG",
+    "cut": 2,
+    "type": "Type IIS"
+  },
+  {
+    "name": "BtsMutI",
+    "site": "CAGTG",
+    "cut": 2,
+    "type": "Type IIS"
+  },
+  {
+    "name": "Cac8I",
+    "site": "GCNNGC",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "ClaI",
+    "site": "ATCGAT",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "CspCI",
+    "site": "CAANNNNNGTGG",
+    "cut": 7,
+    "type": "Type IIS"
+  },
+  {
+    "name": "CviAII",
+    "site": "CATG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "CviKI-1",
+    "site": "RGCY",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "CviQI",
+    "site": "GTAC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "DdeI",
+    "site": "CTNAG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "DpnI",
+    "site": "GATC",
+    "cut": 0,
+    "type": "Type II"
+  },
+  {
+    "name": "DpnII",
+    "site": "GATC",
+    "cut": 0,
+    "type": "Type II"
+  },
+  {
+    "name": "DraI",
+    "site": "TTTAAA",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "DraIII",
+    "site": "CACNNNGTG",
+    "cut": 6,
+    "type": "Type II"
+  },
+  {
+    "name": "DrdI",
+    "site": "GACNNNNNNGTC",
+    "cut": 7,
+    "type": "Type II"
+  },
+  {
+    "name": "EaeI",
+    "site": "YGGCCR",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "EagI",
+    "site": "CGGCCG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "EarI",
+    "site": "CTCTTC",
+    "cut": 1,
+    "type": "Type IIS"
+  },
+  {
+    "name": "EciI",
+    "site": "TCCGCC",
+    "cut": 6,
+    "type": "Type IIS"
+  },
+  {
+    "name": "Eco53kI",
+    "site": "GAGCTC",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "EcoNI",
+    "site": "CCTNNNNNAGG",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "EcoO109I",
+    "site": "RGGNCCY",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "EcoP15I",
+    "site": "CAGCAG",
+    "cut": 2,
+    "type": "Type III"
+  },
+  {
+    "name": "EcoRI",
+    "site": "GAATTC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "EcoRV",
+    "site": "GATATC",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "Esp3I",
+    "site": "CGTCTC",
+    "cut": 1,
+    "type": "Type IIS"
+  },
+  {
+    "name": "FatI",
+    "site": "CATG",
+    "cut": 0,
+    "type": "Type II"
+  },
+  {
+    "name": "FauI",
+    "site": "CCCGC",
+    "cut": 4,
+    "type": "Type IIS"
+  },
+  {
+    "name": "Fnu4HI",
+    "site": "GCNGC",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "FokI",
+    "site": "GGATG",
+    "cut": 2,
+    "type": "Type IIS"
+  },
+  {
+    "name": "FseI",
+    "site": "GGCCGGCC",
+    "cut": 6,
+    "type": "Type II"
+  },
+  {
+    "name": "FspI",
+    "site": "TGCGCA",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "HaeII",
+    "site": "RGCGCY",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
     "name": "HaeIII",
     "site": "GGCC",
     "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "HgaI",
+    "site": "GACGC",
+    "cut": 5,
+    "type": "Type IIS"
+  },
+  {
+    "name": "HhaI",
+    "site": "GCGC",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "HincII",
+    "site": "GTYRAC",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "HindIII",
+    "site": "AAGCTT",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "HinfI",
+    "site": "GANTC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "HinP1I",
+    "site": "GCGC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "HpaI",
+    "site": "GTTAAC",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "HpaII",
+    "site": "CCGG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "HphI",
+    "site": "GGTGA",
+    "cut": 3,
+    "type": "Type IIS"
+  },
+  {
+    "name": "Hpy166II",
+    "site": "GTNNAC",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "Hpy188I",
+    "site": "TCNGA",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "Hpy188III",
+    "site": "TCNNGA",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "Hpy99I",
+    "site": "CGWCG",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "HpyAV",
+    "site": "CCTTC",
+    "cut": 6,
+    "type": "Type IIS"
+  },
+  {
+    "name": "HpyCH4III",
+    "site": "ACNGT",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "HpyCH4IV",
+    "site": "ACGT",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "HpyCH4V",
+    "site": "TGCA",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "KasI",
+    "site": "GGCGCC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "KpnI",
+    "site": "GGTACC",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "MboI",
+    "site": "GATC",
+    "cut": 0,
+    "type": "Type II"
+  },
+  {
+    "name": "MboII",
+    "site": "GAAGA",
+    "cut": 3,
+    "type": "Type IIS"
+  },
+  {
+    "name": "MfeI",
+    "site": "CAATTG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "MluCI",
+    "site": "AATT",
+    "cut": 0,
+    "type": "Type II"
+  },
+  {
+    "name": "MluI",
+    "site": "ACGCGT",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "MmeI",
+    "site": "TCCRAC",
+    "cut": 2,
+    "type": "Type IIS"
+  },
+  {
+    "name": "MnlI",
+    "site": "CCTC",
+    "cut": 3,
+    "type": "Type IIS"
+  },
+  {
+    "name": "MscI",
+    "site": "TGGCCA",
+    "cut": 3,
     "type": "Type II"
   },
   {
@@ -294,14 +864,374 @@
     "type": "Type II"
   },
   {
+    "name": "MslI",
+    "site": "CAYNNNNRTG",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "MspA1I",
+    "site": "CMGCKG",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "MspI",
+    "site": "CCGG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "MwoI",
+    "site": "GCNNNNNNNGC",
+    "cut": 7,
+    "type": "Type II"
+  },
+  {
+    "name": "NaeI",
+    "site": "GCCGGC",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "NarI",
+    "site": "GGCGCC",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "NciI",
+    "site": "CCSGG",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "NcoI",
+    "site": "CCATGG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "NdeI",
+    "site": "CATATG",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "NgoMIV",
+    "site": "GCCGGC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "NheI",
+    "site": "GCTAGC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "NlaIII",
+    "site": "CATG",
+    "cut": 4,
+    "type": "Type II"
+  },
+  {
+    "name": "NlaIV",
+    "site": "GGNNCC",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "NmeAIII",
+    "site": "GCCGAG",
+    "cut": 3,
+    "type": "Type IIS"
+  },
+  {
+    "name": "NotI",
+    "site": "GCGGCCGC",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "NruI",
+    "site": "TCGCGA",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "NsiI",
+    "site": "ATGCAT",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "NspI",
+    "site": "RCATGY",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "PacI",
+    "site": "TTAATTAA",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "PaeR7I",
+    "site": "CTCGAG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "PciI",
+    "site": "ACATGT",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "PflFI",
+    "site": "GACNNNGTC",
+    "cut": 4,
+    "type": "Type II"
+  },
+  {
+    "name": "PflMI",
+    "site": "CCANNNNNTGG",
+    "cut": 7,
+    "type": "Type II"
+  },
+  {
+    "name": "PleI",
+    "site": "GAGTC",
+    "cut": 4,
+    "type": "Type IIS"
+  },
+  {
+    "name": "PluTI",
+    "site": "GGCGCC",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "PmeI",
+    "site": "GTTTAAAC",
+    "cut": 4,
+    "type": "Type II"
+  },
+  {
+    "name": "PmlI",
+    "site": "CACGTG",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "PpuMI",
+    "site": "RGGWCCY",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "PshAI",
+    "site": "GACNNNNGTC",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "PsiI",
+    "site": "TTATAA",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "PspGI",
+    "site": "CCWGG",
+    "cut": 0,
+    "type": "Type II"
+  },
+  {
+    "name": "PspOMI",
+    "site": "GGGCCC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "PstI",
+    "site": "CTGCAG",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "PvuI",
+    "site": "CGATCG",
+    "cut": 4,
+    "type": "Type II"
+  },
+  {
+    "name": "PvuII",
+    "site": "CAGCTG",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
     "name": "RsaI",
     "site": "GTAC",
     "cut": 2,
     "type": "Type II"
   },
   {
-    "name": "TaqI",
-    "site": "TCGA",
+    "name": "RsrII",
+    "site": "CGGWCCG",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "SacI",
+    "site": "GAGCTC",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "SacII",
+    "site": "CCGCGG",
+    "cut": 4,
+    "type": "Type II"
+  },
+  {
+    "name": "SalI",
+    "site": "GTCGAC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "SapI",
+    "site": "GCTCTTC",
+    "cut": 1,
+    "type": "Type IIS"
+  },
+  {
+    "name": "Sau3AI",
+    "site": "GATC",
+    "cut": 0,
+    "type": "Type II"
+  },
+  {
+    "name": "Sau96I",
+    "site": "GGNCC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "SbfI",
+    "site": "CCTGCAGG",
+    "cut": 6,
+    "type": "Type II"
+  },
+  {
+    "name": "ScaI",
+    "site": "AGTACT",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "ScrFI",
+    "site": "CCNGG",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "SexAI",
+    "site": "ACCWGGT",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "SfaNI",
+    "site": "GCATC",
+    "cut": 5,
+    "type": "Type IIS"
+  },
+  {
+    "name": "SfcI",
+    "site": "CTRYAG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "SfiI",
+    "site": "GGCCNNNNNGGCC",
+    "cut": 8,
+    "type": "Type II"
+  },
+  {
+    "name": "SfoI",
+    "site": "GGCGCC",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "SgrAI",
+    "site": "CRCCGGYG",
+    "cut": 2,
+    "type": "Type II"
+  },
+  {
+    "name": "SmaI",
+    "site": "CCCGGG",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "SmlI",
+    "site": "CTYRAG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "SnaBI",
+    "site": "TACGTA",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "SpeI",
+    "site": "ACTAGT",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "SphI",
+    "site": "GCATGC",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "SrfI",
+    "site": "GCCCGGGC",
+    "cut": 4,
+    "type": "Type II"
+  },
+  {
+    "name": "Sse8387I",
+    "site": "CCTGCAGG",
+    "cut": 6,
+    "type": "Type II"
+  },
+  {
+    "name": "SspI",
+    "site": "AATATT",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "StuI",
+    "site": "AGGCCT",
+    "cut": 3,
+    "type": "Type II"
+  },
+  {
+    "name": "StyD4I",
+    "site": "CCNGG",
     "cut": 1,
     "type": "Type II"
   },
@@ -312,15 +1242,99 @@
     "type": "Type II"
   },
   {
-    "name": "AciI",
-    "site": "CCGC",
+    "name": "SwaI",
+    "site": "ATTTAAAT",
+    "cut": 4,
+    "type": "Type II"
+  },
+  {
+    "name": "TaqI",
+    "site": "TCGA",
     "cut": 1,
     "type": "Type II"
   },
   {
-    "name": "BccI",
-    "site": "CCATC",
+    "name": "TaqII",
+    "site": "GACCGA",
+    "cut": 6,
+    "type": "Type IIS"
+  },
+  {
+    "name": "TatI",
+    "site": "WGTACW",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "TfiI",
+    "site": "GAWTC",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "TliI",
+    "site": "CTCGAG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "Tsp45I",
+    "site": "GTSAC",
+    "cut": 0,
+    "type": "Type II"
+  },
+  {
+    "name": "Tsp509I",
+    "site": "AATT",
+    "cut": 0,
+    "type": "Type II"
+  },
+  {
+    "name": "TspRI",
+    "site": "CASTG",
+    "cut": 0,
+    "type": "Type II"
+  },
+  {
+    "name": "Tth111I",
+    "site": "GACNNNGTC",
     "cut": 4,
     "type": "Type II"
+  },
+  {
+    "name": "XbaI",
+    "site": "TCTAGA",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "XcmI",
+    "site": "CCANNNNNNNNNTGG",
+    "cut": 8,
+    "type": "Type II"
+  },
+  {
+    "name": "XhoI",
+    "site": "CTCGAG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "XmaI",
+    "site": "CCCGGG",
+    "cut": 1,
+    "type": "Type II"
+  },
+  {
+    "name": "XmnI",
+    "site": "GAANNNNTTC",
+    "cut": 5,
+    "type": "Type II"
+  },
+  {
+    "name": "ZraI",
+    "site": "GACGC",
+    "cut": 5,
+    "type": "Type IIS"
   }
 ]

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { FilePicker } from '@capawesome/capacitor-file-picker';
-import { Upload, FileText, AlertCircle } from 'lucide-react';
+import { Upload, AlertCircle, Activity } from 'lucide-react';
 import ChromatogramViewer from './components/ChromatogramViewer';
 
 function App() {
@@ -109,7 +109,7 @@ function App() {
   };
 
   return (
-    <div className="w-full h-screen bg-gradient-to-br from-teal-50 to-blue-50 flex flex-col">
+    <div className="w-full h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-cyan-50 flex flex-col">
       {/* Hidden file input - only used for web browsers */}
       <input
         id="file-input"
@@ -130,66 +130,93 @@ function App() {
         </div>
       ) : (
         /* File selection screen */
-        <div className="flex-1 flex flex-col items-center justify-center p-6">
-          {/* App Header */}
-          <div className="text-center mb-8">
-            <div className="flex items-center justify-center mb-4">
-              <FileText className="w-16 h-16 text-teal-600" />
-            </div>
-            <h1 className="text-4xl font-bold text-gray-800 mb-2">
-              ChromaViewer
-            </h1>
-            <p className="text-lg text-gray-600">
-              View and analyze chromatogram files
-            </p>
-          </div>
+        <div className="flex-1 flex items-center justify-center p-4 sm:p-6 overflow-auto">
+          <div className="w-full max-w-4xl flex flex-col items-center gap-6">
+            {/* App Header */}
+            <div className="text-center flex-shrink-0">
+              <div className="flex items-center justify-center mb-4">
+                <div className="relative">
+                  {/* Glowing background circles */}
+                  <div className="absolute inset-0 bg-blue-500 blur-2xl opacity-20 rounded-full animate-pulse"></div>
+                  <div className="absolute inset-0 bg-indigo-500 blur-xl opacity-15 rounded-full"></div>
 
-          {/* Upload area */}
-          <div className="w-full max-w-md">
-            <button
-              onClick={triggerFileInput}
-              disabled={loading}
-              className="w-full bg-white rounded-xl shadow-lg border-2 border-dashed border-teal-300 hover:border-teal-500 transition-all duration-200 p-12 group disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <div className="flex flex-col items-center space-y-4">
-                <div className="p-4 bg-teal-100 rounded-full group-hover:bg-teal-200 transition-colors">
-                  <Upload className="w-12 h-12 text-teal-600" />
-                </div>
-                <div>
-                  <p className="text-xl font-semibold text-gray-700 mb-1">
-                    {loading ? 'Loading...' : 'Select Chromatogram File'}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    AB1 or SCF format
-                  </p>
+                  {/* DNA/Activity icon with gradient background */}
+                  <div className="relative bg-gradient-to-br from-blue-500 to-indigo-600 p-4 rounded-2xl shadow-xl">
+                    <Activity className="w-10 h-10 sm:w-12 sm:h-12 text-white relative" strokeWidth={2.5} />
+                  </div>
                 </div>
               </div>
-            </button>
-
-            {/* Error message */}
-            {error && (
-              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start space-x-3">
-                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-red-700">{error}</p>
-              </div>
-            )}
-
-            {/* Info section */}
-            <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <h3 className="font-semibold text-blue-900 mb-2 flex items-center">
-                <FileText className="w-4 h-4 mr-2" />
-                Supported Formats
-              </h3>
-              <ul className="text-sm text-blue-800 space-y-1">
-                <li>• AB1 (Applied Biosystems)</li>
-                <li>• SCF (Standard Chromatogram Format)</li>
-              </ul>
+              <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
+                ChromaViewer
+              </h1>
             </div>
-          </div>
 
-          {/* Footer */}
-          <div className="mt-12 text-center text-sm text-gray-500">
-            <p>v1.0.0</p>
+            {/* Main content area with button and info side by side */}
+            <div className="w-full flex flex-col md:flex-row gap-4 items-stretch">
+              {/* Upload button */}
+              <div className="flex-1">
+                <button
+                  onClick={triggerFileInput}
+                  disabled={loading}
+                  className="w-full h-full bg-white rounded-xl shadow-lg border-2 border-dashed border-blue-300 hover:border-blue-500 hover:shadow-2xl hover:shadow-blue-100 active:scale-[0.99] transition-all duration-200 p-6 sm:p-8 group disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex flex-col items-center justify-center gap-3 h-full">
+                    <div className="relative">
+                      <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-indigo-500 blur-lg opacity-20 rounded-full group-hover:opacity-30 transition-opacity"></div>
+                      <div className="p-3 sm:p-4 bg-gradient-to-br from-blue-100 via-indigo-100 to-blue-200 rounded-full group-hover:from-blue-200 group-hover:via-indigo-200 group-hover:to-blue-300 transition-all relative shadow-md">
+                        <Upload className="w-8 h-8 sm:w-10 sm:h-10 text-blue-700" strokeWidth={2} />
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-lg sm:text-xl font-semibold text-slate-800 mb-1">
+                        {loading ? 'Loading...' : 'Select Chromatogram File'}
+                      </p>
+                      <p className="text-xs sm:text-sm text-slate-500">
+                        AB1 or SCF format
+                      </p>
+                    </div>
+                  </div>
+                </button>
+
+                {/* Error message */}
+                {error && (
+                  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-red-700">{error}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Info section - side by side on desktop */}
+              <div className="flex-shrink-0 md:w-64">
+                <div className="h-full p-5 bg-gradient-to-br from-blue-50 via-indigo-50 to-blue-100 border-2 border-blue-200 rounded-xl shadow-md flex flex-col justify-center">
+                  <h3 className="font-bold text-blue-900 mb-3 flex items-center text-sm">
+                    <div className="w-1 h-5 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full mr-2"></div>
+                    Supported Formats
+                  </h3>
+                  <ul className="text-sm text-blue-800 space-y-1.5 mb-4">
+                    <li className="flex items-start">
+                      <span className="text-blue-500 mr-2">▪</span>
+                      <span>AB1 (Applied Biosystems)</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-blue-500 mr-2">▪</span>
+                      <span>SCF (Standard Chromatogram Format)</span>
+                    </li>
+                  </ul>
+                  <div className="pt-3 border-t border-blue-200">
+                    <p className="text-xs text-blue-700 leading-relaxed">
+                      🔒 All processing is done on your device - your data never leaves your browser.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="text-center text-sm text-slate-500 flex-shrink-0">
+              <p>©Wildtype Technologies, LLC v1.0.0</p>
+            </div>
           </div>
         </div>
       )}

@@ -33,6 +33,25 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   // Click prevention
   const preventClickRef = useRef(false);
   const lastTouchEndTimeRef = useRef(0);
+
+  // Touch selection ref - track if this touch is for selection vs scrolling
+  const selectionTouchRef = useRef({
+    isSelecting: false,
+    startX: 0,
+    startY: 0,
+    identifier: null,
+    canvasX: 0,
+    canvasY: 0,
+    timeoutId: null
+  });
+
+  // Auto-scroll ref for edge scrolling during selection
+  const autoScrollRef = useRef({
+    isActive: false,
+    direction: 0, // -1 for left/up, 1 for right/down
+    rafId: null
+  });
+
   const [parsedData, setParsedData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -51,10 +70,6 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   const [selectedPosition, setSelectedPosition] = useState(null);
   const [selectedNucleotide, setSelectedNucleotide] = useState(null);
 
-  // Add state for highligting regions
-  const [highlightStart, setHighlightStart] = useState('');
-  const [highlightEnd, setHighlightEnd] = useState('');
-  const [showHighlight, setShowHighlight] = useState(false);
 
   // Add state for editing
   const [isEditing, setIsEditing] = useState(false);
@@ -72,6 +87,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   const [selectedEnzymes, setSelectedEnzymes] = useState([]);
   const [restrictionSites, setRestrictionSites] = useState([]);
   const [showRestrictionSites, setShowRestrictionSites] = useState(false);
+  const [enzymeSearchQuery, setEnzymeSearchQuery] = useState('');
 
   // Layout mode: 'horizontal' or 'wrapped'
   const [layoutMode, setLayoutMode] = useState('horizontal');
@@ -90,6 +106,12 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   const [minORFLength, setMinORFLength] = useState(100); // Minimum ORF length in base pairs
   const [detectedORFs, setDetectedORFs] = useState([]);
   const [selectedORF, setSelectedORF] = useState(null);
+
+  // BLAST region selection
+  const [selectionRange, setSelectionRange] = useState(null); // {start: number, end: number}
+  const selectionRangeRef = useRef(null); // Ref for immediate access during drawing
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStartPosition, setDragStartPosition] = useState(null);
 
   // Add keyboard shortcuts for editing bases
   useEffect(() => {
@@ -182,7 +204,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       });
       return () => cancelAnimationFrame(rafId);
     }
-  }, [parsedData, zoomLevel, scrollPosition, showChannels, qualityThreshold, selectedPosition, hoveredPosition, isEditing, restrictionSites, showRestrictionSites, layoutMode, showReverseComplement, searchMatches, currentMatchIndex, showORFs, detectedORFs, selectedORF]);
+  }, [parsedData, zoomLevel, scrollPosition, showChannels, qualityThreshold, selectedPosition, hoveredPosition, isEditing, restrictionSites, showRestrictionSites, layoutMode, showReverseComplement, searchMatches, currentMatchIndex, showORFs, detectedORFs, selectedORF, selectionRange, isDragging]);
 
   // FIX: Add cleanup on unmount
   useEffect(() => {
@@ -360,6 +382,99 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     inertiaState.current.rafId = requestAnimationFrame(inertiaStep);
   }, [parsedData, zoomLevel, stopInertia]);
 
+  // Helper function to convert canvas coordinates to base call position
+  const getBasePositionFromCanvas = useCallback((canvasX, canvasY) => {
+    if (!parsedData) return null;
+
+    const canvas = canvasRef.current;
+    const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
+    const traceLengths = Object.values(displayData.traces).map(trace => trace.length);
+    const maxTraceLength = Math.max(...traceLengths);
+
+    let startIndex, endIndex;
+
+    if (layoutMode === 'wrapped') {
+      // Wrapped mode: determine which row was clicked
+      const rowHeight = 200;
+      const tracePointsPerRow = Math.floor(canvas.width / zoomLevel);
+      const row = Math.floor(canvasY / rowHeight);
+
+      startIndex = row * tracePointsPerRow;
+      endIndex = Math.min(startIndex + tracePointsPerRow, maxTraceLength);
+    } else {
+      // Horizontal mode: use scroll position
+      const dataLength = maxTraceLength;
+      const visiblePoints = Math.floor(canvas.width / zoomLevel);
+      startIndex = Math.floor(scrollPosition * (dataLength - visiblePoints));
+      endIndex = Math.min(startIndex + visiblePoints, dataLength);
+    }
+
+    // Find closest base call position
+    let closestPosition = null;
+    let closestDistance = Infinity;
+
+    for (let i = 0; i < displayData.baseCalls.length; i++) {
+      const peakPosition = displayData.peakLocations && displayData.peakLocations[i]
+        ? displayData.peakLocations[i]
+        : (i * maxTraceLength / displayData.baseCalls.length);
+
+      if (peakPosition < startIndex || peakPosition > endIndex) continue;
+
+      const baseX = ((peakPosition - startIndex) / (endIndex - startIndex)) * canvas.width;
+      const distance = Math.abs(canvasX - baseX);
+
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestPosition = i;
+      }
+    }
+
+    // Return position only if within reasonable proximity (50px threshold)
+    return (closestPosition !== null && closestDistance < 50) ? closestPosition : null;
+  }, [parsedData, showReverseComplement, layoutMode, zoomLevel, scrollPosition]);
+
+  // Auto-scroll functions for edge scrolling during selection
+  const startAutoScroll = useCallback((direction, mode = 'horizontal') => {
+    if (autoScrollRef.current.isActive) return;
+
+    autoScrollRef.current.isActive = true;
+    autoScrollRef.current.direction = direction;
+
+    const scroll = () => {
+      if (!autoScrollRef.current.isActive) return;
+
+      if (mode === 'horizontal') {
+        // Horizontal mode - scroll left/right
+        const scrollSpeed = 0.0015; // Slower speed for better control during selection
+        const newPosition = scrollOffsetRef.current + (autoScrollRef.current.direction * scrollSpeed);
+        scrollOffsetRef.current = Math.max(0, Math.min(1, newPosition));
+        setScrollPosition(scrollOffsetRef.current);
+        drawChromatogram();
+      } else {
+        // Wrapped mode - scroll up/down
+        const canvas = canvasRef.current;
+        const container = canvas.parentElement;
+        if (container) {
+          const scrollSpeed = 5; // pixels per frame
+          container.scrollTop += autoScrollRef.current.direction * scrollSpeed;
+        }
+      }
+
+      autoScrollRef.current.rafId = requestAnimationFrame(scroll);
+    };
+
+    autoScrollRef.current.rafId = requestAnimationFrame(scroll);
+  }, []);
+
+  const stopAutoScroll = useCallback(() => {
+    if (autoScrollRef.current.rafId) {
+      cancelAnimationFrame(autoScrollRef.current.rafId);
+      autoScrollRef.current.rafId = null;
+    }
+    autoScrollRef.current.isActive = false;
+    autoScrollRef.current.direction = 0;
+  }, []);
+
   // CLEAN TOUCH HANDLERS - only for horizontal mode
   const handleCanvasTouchStart = useCallback((e) => {
     if (layoutMode !== 'horizontal') return;
@@ -389,7 +504,47 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
 
     // Clear hover to avoid conflicts
     setHoveredPosition(null);
-  }, [layoutMode, stopInertia]);
+
+    // Start long-press timer for selection
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const canvasX = (touch.clientX - rect.left) * scaleX;
+    const canvasY = (touch.clientY - rect.top) * scaleY;
+
+    selectionTouchRef.current = {
+      isSelecting: false,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      identifier: touch.identifier,
+      canvasX,
+      canvasY
+    };
+
+    // Start a timeout for long press detection (500ms)
+    const longPressTimeout = setTimeout(() => {
+      // Only trigger if touch hasn't moved (hasMoved is still false)
+      if (!touchState.current.hasMoved) {
+        const position = getBasePositionFromCanvas(canvasX, canvasY);
+
+        if (position !== null) {
+          selectionTouchRef.current.isSelecting = true;
+          setIsDragging(true);
+          setDragStartPosition(position);
+          selectionRangeRef.current = null;
+          setSelectionRange(null);
+
+          // Provide haptic feedback if available
+          if (navigator.vibrate) {
+            navigator.vibrate(50);
+          }
+        }
+      }
+    }, 500);
+
+    selectionTouchRef.current.timeoutId = longPressTimeout;
+  }, [layoutMode, stopInertia, getBasePositionFromCanvas]);
 
   const handleCanvasTouchMove = useCallback((e) => {
     if (layoutMode !== 'horizontal') return;
@@ -409,6 +564,55 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     if (!touchState.current.hasMoved && (deltaX > MOVE_THRESHOLD || deltaY > MOVE_THRESHOLD)) {
       touchState.current.hasMoved = true;
       preventClickRef.current = true;
+
+      // Cancel long-press timer if scrolling started and not yet selecting
+      if (!selectionTouchRef.current.isSelecting && selectionTouchRef.current.timeoutId) {
+        clearTimeout(selectionTouchRef.current.timeoutId);
+        selectionTouchRef.current.timeoutId = null;
+      }
+    }
+
+    // If we're in selection mode, update the selection range instead of scrolling
+    if (selectionTouchRef.current.isSelecting && isDragging) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const canvasX = (touch.clientX - rect.left) * scaleX;
+      const canvasY = (touch.clientY - rect.top) * scaleY;
+
+      // Check if touch is near edge for auto-scroll
+      const edgeThreshold = 50; // pixels from edge
+      const touchScreenX = touch.clientX - rect.left;
+
+      if (touchScreenX < edgeThreshold && scrollOffsetRef.current > 0) {
+        // Near left edge - scroll left
+        startAutoScroll(-1, 'horizontal');
+      } else if (touchScreenX > rect.width - edgeThreshold && scrollOffsetRef.current < 1) {
+        // Near right edge - scroll right
+        startAutoScroll(1, 'horizontal');
+      } else {
+        // Not near edge - stop auto-scroll
+        stopAutoScroll();
+      }
+
+      const currentPosition = getBasePositionFromCanvas(canvasX, canvasY);
+
+      if (currentPosition !== null && dragStartPosition !== null) {
+        const start = Math.min(dragStartPosition, currentPosition);
+        const end = Math.max(dragStartPosition, currentPosition);
+        const newRange = { start, end };
+
+        // Update both state and ref (ref is used for immediate drawing)
+        selectionRangeRef.current = newRange;
+        setSelectionRange(newRange);
+
+        // Manually redraw to show updated selection (useEffect skips during touchState.isActive)
+        drawChromatogram();
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+      return; // Don't scroll while selecting
     }
 
     // Only prevent default after we know it's a scroll (not a tap)
@@ -449,13 +653,30 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     // Update for next move event
     touchState.current.lastX = touch.clientX;
     touchState.current.lastTime = currentTime;
-  }, [layoutMode, parsedData, zoomLevel]);
+  }, [layoutMode, parsedData, zoomLevel, getBasePositionFromCanvas, isDragging, dragStartPosition, startAutoScroll, stopAutoScroll]);
 
   const handleCanvasTouchEnd = useCallback((e) => {
     if (layoutMode !== 'horizontal') return;
     if (!touchState.current.isActive) return;
 
     e.stopPropagation();
+
+    // Clear long-press timer if it exists
+    if (selectionTouchRef.current.timeoutId) {
+      clearTimeout(selectionTouchRef.current.timeoutId);
+      selectionTouchRef.current.timeoutId = null;
+    }
+
+    // If we were selecting, finalize the selection
+    if (selectionTouchRef.current.isSelecting && isDragging) {
+      stopAutoScroll(); // Stop any auto-scrolling
+      setIsDragging(false);
+      setDragStartPosition(null);
+      selectionTouchRef.current.isSelecting = false;
+      touchState.current.isActive = false;
+      setScrollPosition(scrollOffsetRef.current);
+      return;
+    }
 
     const wasTap = !touchState.current.hasMoved;
 
@@ -502,7 +723,137 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     setTimeout(() => {
       preventClickRef.current = false;
     }, 300);
-  }, [layoutMode, startInertia]);
+  }, [layoutMode, startInertia, isDragging, stopAutoScroll]);
+
+  // TOUCH HANDLERS FOR WRAPPED MODE
+  const handleWrappedTouchStart = useCallback((e) => {
+    if (layoutMode !== 'wrapped') return;
+    if (e.touches.length !== 1) return;
+
+    const touch = e.touches[0];
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const canvasX = (touch.clientX - rect.left) * scaleX;
+    const canvasY = (touch.clientY - rect.top) * scaleY;
+
+    selectionTouchRef.current = {
+      isSelecting: false,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      identifier: touch.identifier,
+      canvasX,
+      canvasY
+    };
+
+    // Start a timeout for long press detection (500ms)
+    const longPressTimeout = setTimeout(() => {
+      const position = getBasePositionFromCanvas(canvasX, canvasY);
+
+      if (position !== null) {
+        selectionTouchRef.current.isSelecting = true;
+        setIsDragging(true);
+        setDragStartPosition(position);
+        selectionRangeRef.current = null;
+        setSelectionRange(null);
+
+        // Provide haptic feedback if available
+        if (navigator.vibrate) {
+          navigator.vibrate(50);
+        }
+      }
+    }, 500);
+
+    selectionTouchRef.current.timeoutId = longPressTimeout;
+  }, [layoutMode, getBasePositionFromCanvas]);
+
+  const handleWrappedTouchMove = useCallback((e) => {
+    if (layoutMode !== 'wrapped') return;
+    if (e.touches.length !== 1) return;
+
+    const touch = e.touches[0];
+
+    // Cancel long-press if moved before timeout
+    if (!selectionTouchRef.current.isSelecting && selectionTouchRef.current.timeoutId) {
+      const dx = Math.abs(touch.clientX - selectionTouchRef.current.startX);
+      const dy = Math.abs(touch.clientY - selectionTouchRef.current.startY);
+
+      if (dx > 10 || dy > 10) {
+        clearTimeout(selectionTouchRef.current.timeoutId);
+        selectionTouchRef.current.timeoutId = null;
+        return; // Let native scroll happen
+      }
+    }
+
+    // If selecting, update selection and check for auto-scroll
+    if (selectionTouchRef.current.isSelecting && isDragging) {
+      const canvas = canvasRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const canvasX = (touch.clientX - rect.left) * scaleX;
+      const canvasY = (touch.clientY - rect.top) * scaleY;
+
+      // Check if touch is near top/bottom edge of VIEWPORT for auto-scroll
+      const edgeThreshold = 50; // pixels from edge
+      const container = canvas.parentElement;
+
+      if (container) {
+        const containerRect = container.getBoundingClientRect();
+        // Calculate touch position relative to the viewport container
+        const touchViewportY = touch.clientY - containerRect.top;
+
+        if (touchViewportY < edgeThreshold && container.scrollTop > 0) {
+          // Near top of viewport - scroll up
+          startAutoScroll(-1, 'wrapped');
+        } else if (touchViewportY > containerRect.height - edgeThreshold &&
+                   container.scrollTop < container.scrollHeight - container.clientHeight) {
+          // Near bottom of viewport - scroll down
+          startAutoScroll(1, 'wrapped');
+        } else {
+          // Not near edge - stop auto-scroll
+          stopAutoScroll();
+        }
+      }
+
+      const currentPosition = getBasePositionFromCanvas(canvasX, canvasY);
+
+      if (currentPosition !== null && dragStartPosition !== null) {
+        const start = Math.min(dragStartPosition, currentPosition);
+        const end = Math.max(dragStartPosition, currentPosition);
+        const newRange = { start, end };
+
+        // Update both state and ref (ref is used for immediate drawing)
+        selectionRangeRef.current = newRange;
+        setSelectionRange(newRange);
+
+        // Manually redraw to show updated selection
+        drawChromatogram();
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, [layoutMode, isDragging, dragStartPosition, getBasePositionFromCanvas, startAutoScroll, stopAutoScroll]);
+
+  const handleWrappedTouchEnd = useCallback((e) => {
+    if (layoutMode !== 'wrapped') return;
+
+    // Clear long-press timer if it exists
+    if (selectionTouchRef.current.timeoutId) {
+      clearTimeout(selectionTouchRef.current.timeoutId);
+      selectionTouchRef.current.timeoutId = null;
+    }
+
+    // If we were selecting, finalize the selection
+    if (selectionTouchRef.current.isSelecting && isDragging) {
+      stopAutoScroll(); // Stop any auto-scrolling
+      setIsDragging(false);
+      setDragStartPosition(null);
+      selectionTouchRef.current.isSelecting = false;
+    }
+  }, [layoutMode, isDragging, stopAutoScroll]);
 
   // Add touch scrolling to canvas (only in horizontal mode)
   useEffect(() => {
@@ -523,6 +874,25 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       canvas.removeEventListener('touchend', handleCanvasTouchEnd);
     };
   }, [parsedData, layoutMode, handleCanvasTouchStart, handleCanvasTouchMove, handleCanvasTouchEnd]);
+
+  // Add touch handlers for wrapped mode (for selection only)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !parsedData) return;
+
+    // Only add touch handlers in wrapped mode
+    if (layoutMode !== 'wrapped') return;
+
+    canvas.addEventListener('touchstart', handleWrappedTouchStart);
+    canvas.addEventListener('touchmove', handleWrappedTouchMove, { passive: false });
+    canvas.addEventListener('touchend', handleWrappedTouchEnd);
+
+    return () => {
+      canvas.removeEventListener('touchstart', handleWrappedTouchStart);
+      canvas.removeEventListener('touchmove', handleWrappedTouchMove);
+      canvas.removeEventListener('touchend', handleWrappedTouchEnd);
+    };
+  }, [parsedData, layoutMode, handleWrappedTouchStart, handleWrappedTouchMove, handleWrappedTouchEnd]);
 
   // Cleanup inertia animation on component unmount
   useEffect(() => {
@@ -1639,6 +2009,38 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       }
     }
 
+    // Draw selection range highlight for BLAST
+    // Use ref for immediate updates during dragging
+    const currentSelection = selectionRangeRef.current || selectionRange;
+    if (currentSelection !== null) {
+      const { start, end } = currentSelection;
+
+      const startPeakPosition = peakLocations && peakLocations[start]
+        ? peakLocations[start]
+        : (start * maxTraceLength / baseCalls.length);
+      const endPeakPosition = peakLocations && peakLocations[end]
+        ? peakLocations[end]
+        : (end * maxTraceLength / baseCalls.length);
+
+      if (endPeakPosition >= startIndex && startPeakPosition <= endIndex) {
+        // Add padding to encompass the entire base letter (12px on each side)
+        const basePadding = 12;
+        const startX = Math.max(0, traceToScreenX(startPeakPosition) - basePadding);
+        const endX = Math.min(canvas.width, traceToScreenX(endPeakPosition) + basePadding);
+
+        // Semi-transparent blue overlay
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+        ctx.fillRect(startX, 0, endX - startX, canvas.height);
+
+        // Border
+        ctx.strokeStyle = '#3B82F6';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(startX, 0, endX - startX, canvas.height);
+        ctx.setLineDash([]);
+      }
+    }
+
     // Draw hover highlight (for bases)
     if (hoveredPosition !== null && hoveredPosition !== selectedPosition) {
       const peakPosition = peakLocations && peakLocations[hoveredPosition]
@@ -1748,54 +2150,6 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
             const x = traceToScreenX(peakPos);
             ctx.fillStyle = colors[baseCalls[i]] || '#000000';
             ctx.fillText(baseCalls[i], x, 20);
-          }
-        }
-      }
-    }
-
-    // Draw sequence highlight
-    if (showHighlight && highlightStart && highlightEnd) {
-      const startPos = parseInt(highlightStart) - 1;
-      const endPos = parseInt(highlightEnd) - 1;
-
-      if (!isNaN(startPos) && !isNaN(endPos) && startPos >= 0 && endPos < baseCalls.length && startPos <= endPos) {
-        const startPeakPosition = peakLocations && peakLocations[startPos]
-          ? peakLocations[startPos]
-          : (startPos * maxTraceLength / baseCalls.length);
-        const endPeakPosition = peakLocations && peakLocations[endPos]
-          ? peakLocations[endPos]
-          : (endPos * maxTraceLength / baseCalls.length);
-
-        if (endPeakPosition >= startIndex && startPeakPosition <= endIndex) {
-          const startX = Math.max(0, traceToScreenX(startPeakPosition));
-          const endX = Math.min(canvas.width, traceToScreenX(endPeakPosition));
-
-          ctx.fillStyle = 'rgba(135, 206, 250, 0.3)';
-          ctx.fillRect(startX - 12, 5, (endX - startX) + 24, baselineY + 20 - 5);
-          ctx.strokeStyle = '#4682B4';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(startX - 12, 5, (endX - startX) + 24, baselineY + 20 - 5);
-
-          // Redraw base letters in the sequence highlight region
-          const colors = {
-            A: '#00AA00',
-            T: '#FF0000',
-            G: '#000000',
-            C: '#0000FF'
-          };
-          ctx.font = 'bold 18px monospace';
-          ctx.textAlign = 'center';
-
-          for (let i = startPos; i <= endPos && i < baseCalls.length; i++) {
-            const peakPos = peakLocations && peakLocations[i] !== undefined
-              ? peakLocations[i]
-              : (i * maxTraceLength / baseCalls.length);
-
-            if (peakPos >= startIndex && peakPos <= endIndex) {
-              const x = traceToScreenX(peakPos);
-              ctx.fillStyle = colors[baseCalls[i]] || '#000000';
-              ctx.fillText(baseCalls[i], x, 20);
-            }
           }
         }
       }
@@ -1966,6 +2320,44 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
         });
       }
 
+      // Draw selection range for this row
+      // Use ref for immediate updates during dragging
+      const currentSelection = selectionRangeRef.current || selectionRange;
+      if (currentSelection !== null) {
+        const { start, end } = currentSelection;
+
+        // Check if selection overlaps with this row
+        if (end >= startBase && start < endBase) {
+          const rowStartPos = Math.max(start, startBase);
+          const rowEndPos = Math.min(end, endBase - 1);
+
+          const startPeakPosition = peakLocations && peakLocations[rowStartPos]
+            ? peakLocations[rowStartPos]
+            : (rowStartPos * maxTraceLength / baseCalls.length);
+          const endPeakPosition = peakLocations && peakLocations[rowEndPos]
+            ? peakLocations[rowEndPos]
+            : (rowEndPos * maxTraceLength / baseCalls.length);
+
+          // Add padding to encompass the entire base letter (12px on each side)
+          const basePadding = 12;
+          const rawStartX = ((startPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width;
+          const rawEndX = ((endPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width;
+          const startX = Math.max(0, rawStartX - basePadding);
+          const endX = Math.min(canvas.width, rawEndX + basePadding);
+
+          // Semi-transparent blue overlay
+          ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+          ctx.fillRect(startX, rowY, endX - startX, rowHeight);
+
+          // Border
+          ctx.strokeStyle = '#3B82F6';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
+          ctx.strokeRect(startX, rowY, endX - startX, rowHeight);
+          ctx.setLineDash([]);
+        }
+      }
+
       // Draw base calls and quality for this row
       ctx.font = 'bold 16px monospace';
 
@@ -2085,43 +2477,6 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Draw sequence highlight for this row
-      if (showHighlight && highlightStart && highlightEnd && parsedData) {
-        const startPos = parseInt(highlightStart) - 1;
-        const endPos = parseInt(highlightEnd) - 1;
-
-        if (!isNaN(startPos) && !isNaN(endPos) && startPos >= 0 && endPos < baseCalls.length && startPos <= endPos) {
-          // Check if highlight overlaps with this row
-          if (endPos >= startBase && startPos < endBase) {
-            const rowStartPos = Math.max(startPos, startBase);
-            const rowEndPos = Math.min(endPos, endBase - 1);
-
-            const startPeakPosition = peakLocations && peakLocations[rowStartPos]
-              ? peakLocations[rowStartPos]
-              : (rowStartPos * maxTraceLength / baseCalls.length);
-            const endPeakPosition = peakLocations && peakLocations[rowEndPos]
-              ? peakLocations[rowEndPos]
-              : (rowEndPos * maxTraceLength / baseCalls.length);
-
-            const startX = Math.max(0, ((startPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width);
-            const endX = Math.min(canvas.width, ((endPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width);
-
-            ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
-            ctx.fillRect(startX - 12, rowY + 5, endX - startX + 24, baselineY + 20 - (rowY + 5));
-
-            ctx.strokeStyle = '#FFD700';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([]);
-            ctx.beginPath();
-            ctx.moveTo(startX, rowY + 5);
-            ctx.lineTo(startX, baselineY + 20);
-            ctx.moveTo(endX, rowY + 5);
-            ctx.lineTo(endX, baselineY + 20);
-            ctx.stroke();
-          }
-        }
-      }
-
       // Draw search matches for this row
       if (searchMatches.length > 0) {
         searchMatches.forEach((match, idx) => {
@@ -2218,6 +2573,11 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   // Updated handleCanvasClick
   const handleCanvasClick = (e) => {
     if (!parsedData) return;
+
+    // CRITICAL: Ignore clicks that were part of a drag operation
+    if (isDragging || dragStartPosition !== null) {
+      return;
+    }
 
     // CRITICAL: Time-based click blocking after touch end
     // Prevents clicks that fire shortly after a scroll gesture
@@ -2324,6 +2684,9 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
 
   // Updated handleCanvasMouseMove
   const handleCanvasMouseMove = (e) => {
+    // Handle drag selection first
+    handleCanvasMouseMoveForDrag(e);
+
     if (!parsedData) return;
 
     // CRITICAL: Skip hover updates during active touch scrolling only
@@ -2401,6 +2764,133 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   // Add mouse leave handler
   const handleCanvasMouseLeave = () => {
     setHoveredPosition(null);
+  };
+
+  // Handle mouse down for drag selection
+  const handleCanvasMouseDown = (e) => {
+    // Skip if currently scrolling
+    if (touchState.current.isActive || inertiaState.current.isActive) {
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const canvasX = (e.clientX - rect.left) * scaleX;
+    const canvasY = (e.clientY - rect.top) * scaleY;
+
+    const position = getBasePositionFromCanvas(canvasX, canvasY);
+
+    if (position !== null) {
+      setIsDragging(true);
+      setDragStartPosition(position);
+      // Clear any existing selection when starting new drag
+      selectionRangeRef.current = null;
+      setSelectionRange(null);
+    }
+  };
+
+  // Handle mouse move during drag
+  const handleCanvasMouseMoveForDrag = (e) => {
+    // Skip if not dragging or if touch scrolling
+    if (!isDragging || touchState.current.isActive) {
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const canvasX = (e.clientX - rect.left) * scaleX;
+    const canvasY = (e.clientY - rect.top) * scaleY;
+
+    // Auto-scroll detection based on layout mode
+    if (layoutMode === 'horizontal') {
+      const edgeThreshold = 50; // pixels from edge
+      const mouseScreenX = e.clientX - rect.left;
+
+      if (mouseScreenX < edgeThreshold && scrollOffsetRef.current > 0) {
+        // Near left edge - scroll left
+        startAutoScroll(-1, 'horizontal');
+      } else if (mouseScreenX > rect.width - edgeThreshold && scrollOffsetRef.current < 1) {
+        // Near right edge - scroll right
+        startAutoScroll(1, 'horizontal');
+      } else {
+        // Not near edge - stop auto-scroll
+        stopAutoScroll();
+      }
+    } else if (layoutMode === 'wrapped') {
+      // Wrapped mode: check vertical position relative to viewport
+      const container = canvas.parentElement;
+      if (container) {
+        const containerRect = container.getBoundingClientRect();
+        const edgeThreshold = 50;
+        const mouseViewportY = e.clientY - containerRect.top;
+
+        if (mouseViewportY < edgeThreshold && container.scrollTop > 0) {
+          // Near top edge - scroll up
+          startAutoScroll(-1, 'wrapped');
+        } else if (mouseViewportY > containerRect.height - edgeThreshold &&
+                   container.scrollTop < container.scrollHeight - container.clientHeight) {
+          // Near bottom edge - scroll down
+          startAutoScroll(1, 'wrapped');
+        } else {
+          // Not near edge - stop auto-scroll
+          stopAutoScroll();
+        }
+      }
+    }
+
+    const currentPosition = getBasePositionFromCanvas(canvasX, canvasY);
+
+    if (currentPosition !== null && dragStartPosition !== null) {
+      // Create selection range (ensure start < end)
+      const start = Math.min(dragStartPosition, currentPosition);
+      const end = Math.max(dragStartPosition, currentPosition);
+      const newRange = { start, end };
+
+      // Update both state and ref (ref is used for immediate drawing)
+      selectionRangeRef.current = newRange;
+      setSelectionRange(newRange);
+
+      // Manually redraw to show updated selection
+      drawChromatogram();
+    }
+  };
+
+  // Handle mouse up to finalize selection
+  const handleCanvasMouseUp = (e) => {
+    if (!isDragging) return;
+
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const canvasX = (e.clientX - rect.left) * scaleX;
+    const canvasY = (e.clientY - rect.top) * scaleY;
+
+    const endPosition = getBasePositionFromCanvas(canvasX, canvasY);
+
+    if (endPosition !== null && dragStartPosition !== null) {
+      const start = Math.min(dragStartPosition, endPosition);
+      const end = Math.max(dragStartPosition, endPosition);
+
+      // Only set selection if range is more than 1 base (prevent single-click selections)
+      if (end > start) {
+        const newRange = { start, end };
+        selectionRangeRef.current = newRange;
+        setSelectionRange(newRange);
+      } else {
+        // Single click - clear selection and let handleCanvasClick handle it
+        selectionRangeRef.current = null;
+        setSelectionRange(null);
+      }
+    }
+
+    setIsDragging(false);
+    setDragStartPosition(null);
+    stopAutoScroll();
   };
 
   const handleScrollbarChange = (e) => {
@@ -2701,6 +3191,36 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     URL.revokeObjectURL(url);
   };
 
+  // Open NCBI BLAST with sequence
+  const openBLAST = (sequence, label, isProtein = false) => {
+    if (!sequence || sequence.length === 0) {
+      console.error('Cannot BLAST empty sequence');
+      return;
+    }
+
+    // NCBI BLAST search page
+    const baseUrl = 'https://blast.ncbi.nlm.nih.gov/Blast.cgi';
+
+    // Format sequence as FASTA
+    const fastaSequence = `>${label}\n${sequence}`;
+
+    // URL encode the sequence
+    const encodedSequence = encodeURIComponent(fastaSequence);
+
+    // Construct URL with parameters
+    // PROGRAM=blastn (nucleotide) or blastp (protein)
+    // PAGE_TYPE=BlastSearch (web interface search page)
+    // QUERY=sequence
+    const program = isProtein ? 'blastp' : 'blastn';
+    const url = `${baseUrl}?PROGRAM=${program}&PAGE_TYPE=BlastSearch&LINK_LOC=blasthome&QUERY=${encodedSequence}`;
+
+    // Open in new tab
+    window.open(url, '_blank', 'noopener,noreferrer');
+
+    const seqType = isProtein ? 'aa' : 'bp';
+    console.log(`Opened BLAST${isProtein ? 'p' : 'n'} for ${label} (${sequence.length} ${seqType})`);
+  };
+
   if (loading) {
     return (
       <div className="bg-white rounded-lg border p-6">
@@ -2838,70 +3358,81 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
             </div>
           )}
 
-          {/* Highlight Region */}
+          {/* Highlight Region - Merged with Selection */}
           <div className="mb-4 pb-4 border-b border-gray-200">
             <h4 className="text-sm font-semibold text-gray-700 mb-2">Highlight Region</h4>
             <div className="space-y-2">
               <div className="flex items-center space-x-2">
                 <input
                   type="number"
-                  value={highlightStart}
-                  onChange={(e) => setHighlightStart(e.target.value)}
+                  value={selectionRange ? selectionRange.start + 1 : ''}
+                  onChange={(e) => {
+                    const startPos = parseInt(e.target.value) - 1;
+                    if (!isNaN(startPos) && startPos >= 0 && parsedData) {
+                      const endPos = selectionRange ? selectionRange.end : startPos;
+                      if (startPos <= endPos && endPos < parsedData.baseCalls.length) {
+                        const newRange = { start: startPos, end: endPos };
+                        selectionRangeRef.current = newRange;
+                        setSelectionRange(newRange);
+                      }
+                    }
+                  }}
                   placeholder="Start"
                   min="1"
-                  max={parsedData?.sequenceLength - 1 || 0}
+                  max={parsedData?.baseCalls?.length || 0}
                   className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded"
                 />
                 <span className="text-sm text-gray-500">to</span>
                 <input
                   type="number"
-                  value={highlightEnd}
-                  onChange={(e) => setHighlightEnd(e.target.value)}
+                  value={selectionRange ? selectionRange.end + 1 : ''}
+                  onChange={(e) => {
+                    const endPos = parseInt(e.target.value) - 1;
+                    if (!isNaN(endPos) && endPos >= 0 && parsedData) {
+                      const startPos = selectionRange ? selectionRange.start : endPos;
+                      if (startPos <= endPos && endPos < parsedData.baseCalls.length) {
+                        const newRange = { start: startPos, end: endPos };
+                        selectionRangeRef.current = newRange;
+                        setSelectionRange(newRange);
+                      }
+                    }
+                  }}
                   placeholder="End"
-                  min="0"
-                  max={parsedData?.sequenceLength || 1}
+                  min="1"
+                  max={parsedData?.baseCalls?.length || 1}
                   className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded"
                 />
               </div>
               <div className="flex space-x-2">
                 <button
-                  onClick={() => setShowHighlight(!showHighlight)}
-                  disabled={!highlightStart || !highlightEnd}
-                  className={`flex-1 px-2 py-1 text-sm rounded ${showHighlight
-                    ? 'bg-yellow-600 text-white'
-                    : 'bg-white text-yellow-700 border border-yellow-300'
-                    } disabled:opacity-50`}
+                  onClick={() => {
+                    selectionRangeRef.current = null;
+                    setSelectionRange(null);
+                  }}
+                  disabled={!selectionRange}
+                  className="flex-1 px-2 py-1 text-sm bg-white text-blue-700 border border-blue-300 rounded hover:bg-blue-50 disabled:opacity-50"
                 >
-                  {showHighlight ? 'Hide' : 'Show'}
+                  Clear
                 </button>
                 <button
                   onClick={() => {
-                    if (highlightStart && highlightEnd && parsedData) {
-                      const startPos = parseInt(highlightStart) - 1;
-                      const endPos = parseInt(highlightEnd) - 1;
-                      if (!isNaN(startPos) && !isNaN(endPos) && startPos >= 0 && endPos < parsedData.baseCalls.length && startPos <= endPos) {
-                        const sequence = parsedData.baseCalls.slice(startPos, endPos + 1).join('');
-                        navigator.clipboard.writeText(sequence);
-                      }
+                    if (selectionRange && parsedData) {
+                      const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
+                      const sequence = displayData.baseCalls.slice(selectionRange.start, selectionRange.end + 1).join('');
+                      navigator.clipboard.writeText(sequence);
                     }
                   }}
-                  disabled={!highlightStart || !highlightEnd}
-                  className="flex-1 px-2 py-1 bg-green-600 text-white text-sm rounded disabled:opacity-50"
+                  disabled={!selectionRange}
+                  className="flex-1 px-2 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-50"
                 >
                   Copy
                 </button>
               </div>
-              {highlightStart && highlightEnd && parsedData && (() => {
-                const startPos = parseInt(highlightStart) - 1;
-                const endPos = parseInt(highlightEnd) - 1;
-                if (!isNaN(startPos) && !isNaN(endPos) && startPos >= 0 && endPos < parsedData.baseCalls.length && startPos <= endPos) {
-                  return (
-                    <p className="text-xs text-gray-600 text-center">
-                      {endPos - startPos + 1} bases
-                    </p>
-                  );
-                }
-              })()}
+              {selectionRange && parsedData && (
+                <p className="text-xs text-gray-600 text-center">
+                  {selectionRange.end - selectionRange.start + 1} bases
+                </p>
+              )}
             </div>
           </div>
 
@@ -2943,25 +3474,49 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
               <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-800">
                 All Enzymes ({restrictionEnzymes.length})
               </summary>
-              <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
-                <div className="grid grid-cols-2 gap-1">
-                  {restrictionEnzymes.map(enzyme => (
-                    <label key={enzyme.name} className="flex items-center space-x-1 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={selectedEnzymes.includes(enzyme.name)}
-                        onChange={() => {
-                          if (selectedEnzymes.includes(enzyme.name)) {
-                            setSelectedEnzymes(selectedEnzymes.filter(e => e !== enzyme.name));
-                          } else {
-                            setSelectedEnzymes([...selectedEnzymes, enzyme.name]);
-                          }
-                        }}
-                        className="w-3 h-3"
-                      />
-                      <span>{enzyme.name}</span>
-                    </label>
-                  ))}
+              <div className="mt-2">
+                {/* Search input */}
+                <input
+                  type="text"
+                  placeholder="Search enzymes..."
+                  value={enzymeSearchQuery}
+                  onChange={(e) => setEnzymeSearchQuery(e.target.value)}
+                  className="w-full px-2 py-1 text-xs border border-gray-300 rounded mb-2 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                />
+
+                {/* Enzyme list */}
+                <div className="max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
+                  <div className="grid grid-cols-2 gap-1">
+                    {restrictionEnzymes
+                      .filter(enzyme =>
+                        enzyme.name.toLowerCase().includes(enzymeSearchQuery.toLowerCase()) ||
+                        enzyme.site.toLowerCase().includes(enzymeSearchQuery.toLowerCase())
+                      )
+                      .map(enzyme => (
+                        <label key={enzyme.name} className="flex items-center space-x-1 text-xs">
+                          <input
+                            type="checkbox"
+                            checked={selectedEnzymes.includes(enzyme.name)}
+                            onChange={() => {
+                              if (selectedEnzymes.includes(enzyme.name)) {
+                                setSelectedEnzymes(selectedEnzymes.filter(e => e !== enzyme.name));
+                              } else {
+                                setSelectedEnzymes([...selectedEnzymes, enzyme.name]);
+                              }
+                            }}
+                            className="w-3 h-3"
+                          />
+                          <span>{enzyme.name}</span>
+                          <span className="text-gray-400">({enzyme.site})</span>
+                        </label>
+                      ))}
+                  </div>
+                  {restrictionEnzymes.filter(enzyme =>
+                    enzyme.name.toLowerCase().includes(enzymeSearchQuery.toLowerCase()) ||
+                    enzyme.site.toLowerCase().includes(enzymeSearchQuery.toLowerCase())
+                  ).length === 0 && (
+                    <div className="text-xs text-gray-400 text-center py-2">No enzymes found</div>
+                  )}
                 </div>
               </div>
             </details>
@@ -3121,6 +3676,70 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
               <RotateCcw className="w-4 h-4" />
               <span>Reset View</span>
             </button>
+
+            {/* BLAST Actions */}
+            <div className="border-t border-gray-300 pt-2 mt-2">
+              <p className="text-xs text-gray-500 mb-2 font-semibold">BLAST Analysis</p>
+
+              <button
+                onClick={() => {
+                  if (selectionRange) {
+                    const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
+                    const sequence = displayData.baseCalls.slice(selectionRange.start, selectionRange.end + 1).join('');
+                    const label = `${fileName}_region_${selectionRange.start + 1}-${selectionRange.end + 1}`;
+                    openBLAST(sequence, label);
+                  }
+                }}
+                disabled={selectionRange === null}
+                className="w-full px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed mb-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+                <span>BLAST Selected Region</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  if (selectedORF !== null && detectedORFs[selectedORF]) {
+                    const orf = detectedORFs[selectedORF];
+                    const proteinSequence = orf.aminoAcids;
+                    const label = `${fileName}_ORF_${orf.frame}_${orf.start + 1}-${orf.end + 1}`;
+                    openBLAST(proteinSequence, label, true);
+                  }
+                }}
+                disabled={selectedORF === null}
+                className="w-full px-3 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed mb-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+                <span>BLASTp Selected ORF</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
+                  const sequence = displayData.sequence;
+                  const suffix = showReverseComplement ? '_reverse_complement' : '';
+                  const label = `${fileName}${suffix}`;
+                  openBLAST(sequence, label);
+                }}
+                className="w-full px-3 py-2 bg-teal-600 text-white text-sm rounded hover:bg-teal-700 flex items-center justify-center space-x-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+                <span>BLAST Full Sequence</span>
+              </button>
+            </div>
+
             {onClose && (
               <button
                 onClick={onClose}
@@ -3235,13 +3854,24 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
             ref={canvasRef}
             onClick={handleCanvasClick}
             onDoubleClick={handleNavigation}
+            onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
-            onMouseLeave={handleCanvasMouseLeave}
-            className={`w-full border border-gray-200 rounded cursor-pointer ${layoutMode === 'horizontal' ? 'h-full' : ''}`}
+            onMouseUp={handleCanvasMouseUp}
+            onMouseLeave={() => {
+              handleCanvasMouseLeave();
+              // Cancel drag if mouse leaves canvas
+              if (isDragging) {
+                setIsDragging(false);
+                setDragStartPosition(null);
+                stopAutoScroll();
+              }
+            }}
+            className={`w-full border border-gray-200 rounded ${layoutMode === 'horizontal' ? 'h-full' : ''}`}
             style={{
               touchAction: layoutMode === 'wrapped' ? 'auto' : 'none',
               display: 'block',
-              willChange: 'contents'
+              willChange: 'contents',
+              cursor: isDragging ? 'text' : 'pointer'
             }}
           />
         </div>
