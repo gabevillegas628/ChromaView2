@@ -2257,15 +2257,30 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
             const rowStartPos = Math.max(startPos, startBase);
             const rowEndPos = Math.min(endPos, endBase - 1);
 
-            const startPeakPosition = peakLocations && peakLocations[rowStartPos]
-              ? peakLocations[rowStartPos]
-              : (rowStartPos * maxTraceLength / baseCalls.length);
-            const endPeakPosition = peakLocations && peakLocations[rowEndPos]
-              ? peakLocations[rowEndPos]
-              : (rowEndPos * maxTraceLength / baseCalls.length);
+            // Calculate X positions - extend to edges if ORF spans beyond this row
+            let startX, endX;
 
-            const startX = Math.max(0, ((startPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width);
-            const endX = Math.min(canvas.width, ((endPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width);
+            if (startPos < startBase) {
+              // ORF starts before this row, extend to left edge
+              startX = 0;
+            } else {
+              // ORF starts in this row, calculate position
+              const startPeakPosition = peakLocations && peakLocations[startPos]
+                ? peakLocations[startPos]
+                : (startPos * maxTraceLength / baseCalls.length);
+              startX = ((startPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width;
+            }
+
+            if (endPos >= endBase) {
+              // ORF ends after this row, extend to right edge
+              endX = canvas.width;
+            } else {
+              // ORF ends in this row, calculate position
+              const endPeakPosition = peakLocations && peakLocations[endPos]
+                ? peakLocations[endPos]
+                : (endPos * maxTraceLength / baseCalls.length);
+              endX = ((endPeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width;
+            }
 
             // Calculate Y position based on frame
             const frameIndex = ['+1', '+2', '+3', '-1', '-2', '-3'].indexOf(orf.frame);
@@ -2303,8 +2318,8 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
 
                   const x = ((middlePeakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width;
 
-                  // Only draw if within canvas bounds
-                  if (x >= 0 && x <= canvas.width) {
+                  // Only draw if within canvas bounds (with margin for centered text)
+                  if (x >= -20 && x <= canvas.width + 20) {
                     ctx.fillText(orf.aminoAcids[i], x, yPos + orfHeight / 2);
                   }
                 }
@@ -2360,6 +2375,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
 
       // Draw base calls and quality for this row
       ctx.font = 'bold 16px monospace';
+      ctx.textAlign = 'center';
 
       for (let i = startBase; i < endBase; i++) {
         const peakPosition = peakLocations && peakLocations[i]
@@ -2400,7 +2416,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
 
           // Draw base letter
           ctx.fillStyle = colors[base] || '#666666';
-          ctx.fillText(base, x - 6, rowY + baseCallHeight - 5);
+          ctx.fillText(base, x, rowY + baseCallHeight - 5);
 
           // Draw quality bar
           ctx.fillStyle = qual >= qualityThreshold ? colors[base] || '#666666' : '#CCCCCC';
