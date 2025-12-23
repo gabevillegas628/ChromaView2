@@ -112,6 +112,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   const selectionRangeRef = useRef(null); // Ref for immediate access during drawing
   const [isDragging, setIsDragging] = useState(false);
   const [dragStartPosition, setDragStartPosition] = useState(null);
+  const selectionDrawRafId = useRef(null); // RAF ID for throttling selection redraws
 
   // Add keyboard shortcuts for editing bases
   useEffect(() => {
@@ -189,9 +190,11 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   // FIX: Improved effect with proper cleanup and timing
   useEffect(() => {
     if (parsedData && canvasRef.current) {
-      // CRITICAL: Skip automatic redraw during active touch scrolling or inertia
-      // This prevents state changes (like hoveredPosition) from causing jumps
-      if (touchState.current.isActive || inertiaState.current.isActive) {
+      // CRITICAL: Skip automatic redraw during active touch scrolling, inertia, or selection dragging
+      // This prevents state changes from causing jumps and flickering
+      if (touchState.current.isActive ||
+          inertiaState.current.isActive ||
+          selectionTouchRef.current.isSelecting) {
         return; // Skip this render, let manual drawChromatogram() handle it
       }
 
@@ -209,6 +212,12 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   // FIX: Add cleanup on unmount
   useEffect(() => {
     return () => {
+      // Cancel any pending selection draw RAF
+      if (selectionDrawRafId.current !== null) {
+        cancelAnimationFrame(selectionDrawRafId.current);
+        selectionDrawRafId.current = null;
+      }
+
       // Cleanup canvas context if component unmounts
       if (canvasRef.current) {
         const ctx = canvasRef.current.getContext('2d');
@@ -606,8 +615,13 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
         selectionRangeRef.current = newRange;
         setSelectionRange(newRange);
 
-        // Manually redraw to show updated selection (useEffect skips during touchState.isActive)
-        drawChromatogram();
+        // Throttle redraw with RAF to prevent multiple simultaneous draws
+        if (selectionDrawRafId.current === null) {
+          selectionDrawRafId.current = requestAnimationFrame(() => {
+            drawChromatogram();
+            selectionDrawRafId.current = null;
+          });
+        }
       }
 
       e.preventDefault();
@@ -670,10 +684,19 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     // If we were selecting, finalize the selection
     if (selectionTouchRef.current.isSelecting && isDragging) {
       stopAutoScroll(); // Stop any auto-scrolling
-      setIsDragging(false);
-      setDragStartPosition(null);
+
+      // Cancel any pending selection draw RAF
+      if (selectionDrawRafId.current !== null) {
+        cancelAnimationFrame(selectionDrawRafId.current);
+        selectionDrawRafId.current = null;
+      }
+
+      // CRITICAL: Clear selection state BEFORE setIsDragging(false) so the
+      // useEffect cleanup redraw runs and fixes any corrupt rendering
       selectionTouchRef.current.isSelecting = false;
       touchState.current.isActive = false;
+      setIsDragging(false);
+      setDragStartPosition(null);
       setScrollPosition(scrollOffsetRef.current);
       return;
     }
@@ -828,8 +851,13 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
         selectionRangeRef.current = newRange;
         setSelectionRange(newRange);
 
-        // Manually redraw to show updated selection
-        drawChromatogram();
+        // Throttle redraw with RAF to prevent multiple simultaneous draws
+        if (selectionDrawRafId.current === null) {
+          selectionDrawRafId.current = requestAnimationFrame(() => {
+            drawChromatogram();
+            selectionDrawRafId.current = null;
+          });
+        }
       }
 
       e.preventDefault();
@@ -849,9 +877,18 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     // If we were selecting, finalize the selection
     if (selectionTouchRef.current.isSelecting && isDragging) {
       stopAutoScroll(); // Stop any auto-scrolling
+
+      // Cancel any pending selection draw RAF
+      if (selectionDrawRafId.current !== null) {
+        cancelAnimationFrame(selectionDrawRafId.current);
+        selectionDrawRafId.current = null;
+      }
+
+      // CRITICAL: Clear selection state BEFORE setIsDragging(false) so the
+      // useEffect cleanup redraw runs and fixes any corrupt rendering
+      selectionTouchRef.current.isSelecting = false;
       setIsDragging(false);
       setDragStartPosition(null);
-      selectionTouchRef.current.isSelecting = false;
     }
   }, [layoutMode, isDragging, stopAutoScroll]);
 
@@ -1543,9 +1580,16 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     const offCtx = offscreenCanvasRef.current.getContext('2d', { willReadFrequently: false });
     if (!offCtx) return;
 
-    // Clear offscreen canvas
+    // Clear offscreen canvas and reset context state
     offCtx.fillStyle = '#ffffff';
     offCtx.fillRect(0, 0, fullWidth, height);
+
+    // Reset context state to defaults
+    offCtx.setTransform(1, 0, 0, 1, 0, 0);
+    offCtx.textAlign = 'start';
+    offCtx.textBaseline = 'alphabetic';
+    offCtx.globalAlpha = 1.0;
+    offCtx.globalCompositeOperation = 'source-over';
 
     // Find global max for normalization
     let maxValue = 0;
@@ -1737,6 +1781,53 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     }
   }, [parsedData, zoomLevel, showChannels, showReverseComplement, layoutMode, showORFs, detectedORFs, showRestrictionSites, restrictionSites, renderToOffscreenCanvas]);
 
+  // Force a clean redraw when layout mode changes (important for mobile)
+  useEffect(() => {
+    if (!parsedData) return;
+
+    // CRITICAL: Stop all animations when layout mode changes
+    // This prevents "fucky" behavior when switching layouts during inertial scrolling
+    stopInertia();
+    stopAutoScroll();
+
+    // Clear touch state
+    touchState.current.isActive = false;
+    touchState.current.hasMoved = false;
+
+    // Clear selection/drag state
+    if (selectionTouchRef.current.timeoutId) {
+      clearTimeout(selectionTouchRef.current.timeoutId);
+      selectionTouchRef.current.timeoutId = null;
+    }
+    selectionTouchRef.current.isSelecting = false;
+    setIsDragging(false);
+    setDragStartPosition(null);
+
+    // Cancel any pending selection draw RAF
+    if (selectionDrawRafId.current !== null) {
+      cancelAnimationFrame(selectionDrawRafId.current);
+      selectionDrawRafId.current = null;
+    }
+
+    // Use requestAnimationFrame to ensure DOM has updated before redrawing
+    const rafId = requestAnimationFrame(() => {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          // Force a complete clear and redraw
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+      }
+      // Trigger a redraw on the next frame
+      requestAnimationFrame(() => {
+        drawChromatogram();
+      });
+    });
+
+    return () => cancelAnimationFrame(rafId);
+  }, [layoutMode, stopInertia, stopAutoScroll]); // Only trigger when layout mode changes
+
   const drawChromatogram = () => {
     const canvas = canvasRef.current;
     if (!canvas || !parsedData) return;
@@ -1768,32 +1859,56 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     }
 
     // Set canvas size dynamically based on container
-    const container = canvas.parentElement;
-    if (container) {
-      // Force layout recalculation (important for mobile WebView)
-      void container.offsetHeight;
-      canvas.width = container.offsetWidth || 1200;
+    // CRITICAL: Do NOT resize canvas during drag/selection! This causes flickering and broken rendering
+    // Only resize when dimensions actually changed AND we're not actively selecting
+    const isActivelySelecting = selectionTouchRef.current.isSelecting || touchState.current.isActive;
 
-      if (layoutMode === 'wrapped') {
-        // In wrapped mode, calculate height based on number of rows needed
-        const traceLengths = Object.values(traces).map(trace => trace.length);
-        const maxTraceLength = Math.max(...traceLengths);
-        const tracePointsPerRow = Math.floor(canvas.width / zoomLevel);
-        const numRows = Math.ceil(maxTraceLength / tracePointsPerRow);
-        const rowHeight = 200; // Height per row
-        canvas.height = numRows * rowHeight;
+    if (!isActivelySelecting) {
+      const container = canvas.parentElement;
+      if (container) {
+        // Force layout recalculation (important for mobile WebView)
+        void container.offsetHeight;
+        const newWidth = container.offsetWidth || 1200;
+        let newHeight;
+
+        if (layoutMode === 'wrapped') {
+          // In wrapped mode, calculate height based on number of rows needed
+          const traceLengths = Object.values(traces).map(trace => trace.length);
+          const maxTraceLength = Math.max(...traceLengths);
+          const tracePointsPerRow = Math.floor(newWidth / zoomLevel);
+          const numRows = Math.ceil(maxTraceLength / tracePointsPerRow);
+          const rowHeight = 200; // Height per row
+          newHeight = numRows * rowHeight;
+        } else {
+          newHeight = container.offsetHeight || 300;
+        }
+
+        // Only resize if dimensions actually changed
+        if (canvas.width !== newWidth || canvas.height !== newHeight) {
+          canvas.width = newWidth;
+          canvas.height = newHeight;
+        }
       } else {
-        canvas.height = container.offsetHeight || 300;
+        // Fallback to larger default sizes
+        const newWidth = 1600;
+        const newHeight = 300;
+        if (canvas.width !== newWidth || canvas.height !== newHeight) {
+          canvas.width = newWidth;
+          canvas.height = newHeight;
+        }
       }
-    } else {
-      // Fallback to larger default sizes
-      canvas.width = 1600;
-      canvas.height = 300;
     }
 
-    // Clear canvas
+    // Clear canvas and reset context state
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Reset all canvas context state to defaults (important for layout switching)
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+    ctx.globalAlpha = 1.0;
+    ctx.globalCompositeOperation = 'source-over';
 
     if (layoutMode === 'wrapped') {
       // Wrapped layout: draw multiple rows
@@ -1828,35 +1943,51 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       const sourceWidth = canvas.width;
       const sourceHeight = canvas.height;
 
-      // Copy visible portion from offscreen canvas
-      ctx.drawImage(
-        offscreenCanvasRef.current,
-        sourceX, 0, // source x, y
-        sourceWidth, sourceHeight, // source width, height
-        0, 0, // dest x, y
-        canvas.width, canvas.height // dest width, height
-      );
+      // Validate offscreen canvas dimensions before drawing
+      if (sourceX >= 0 &&
+          sourceX + sourceWidth <= offscreenCanvasRef.current.width &&
+          sourceHeight === offscreenCanvasRef.current.height) {
+        // Copy visible portion from offscreen canvas
+        ctx.drawImage(
+          offscreenCanvasRef.current,
+          sourceX, 0, // source x, y
+          sourceWidth, sourceHeight, // source width, height
+          0, 0, // dest x, y
+          canvas.width, canvas.height // dest width, height
+        );
 
-      // Draw dynamic overlays on top (these change based on interaction)
-      drawHorizontalOverlays(ctx, baseCalls, maxTraceLength, peakLocations, startIndex, endIndex);
-      return;
+        // Draw dynamic overlays on top (these change based on interaction)
+        drawHorizontalOverlays(ctx, baseCalls, maxTraceLength, peakLocations, startIndex, endIndex);
+        return;
+      } else {
+        // Dimensions don't match - force regeneration
+        console.log('Offscreen canvas dimensions invalid, regenerating');
+        offscreenCanvasRef.current = null;
+      }
     }
 
     // Need to regenerate offscreen canvas (e.g., after layout switch)
-    if (needsRegeneration) {
+    if (needsRegeneration || !offscreenCanvasRef.current) {
       renderToOffscreenCanvas();
-      // If offscreen canvas is now ready, use it
+      // If offscreen canvas is now ready, validate and use it
       if (offscreenCanvasRef.current && offscreenCanvasRef.current.width > 0) {
         const sourceX = startIndex * zoomLevel;
-        ctx.drawImage(
-          offscreenCanvasRef.current,
-          sourceX, 0,
-          canvas.width, canvas.height,
-          0, 0,
-          canvas.width, canvas.height
-        );
-        drawHorizontalOverlays(ctx, baseCalls, maxTraceLength, peakLocations, startIndex, endIndex);
-        return;
+        // Validate dimensions before drawing
+        if (sourceX >= 0 &&
+            sourceX + canvas.width <= offscreenCanvasRef.current.width &&
+            canvas.height === offscreenCanvasRef.current.height) {
+          ctx.drawImage(
+            offscreenCanvasRef.current,
+            sourceX, 0,
+            canvas.width, canvas.height,
+            0, 0,
+            canvas.width, canvas.height
+          );
+          drawHorizontalOverlays(ctx, baseCalls, maxTraceLength, peakLocations, startIndex, endIndex);
+          return;
+        } else {
+          console.log('Newly generated offscreen canvas has invalid dimensions, using fallback render');
+        }
       }
     }
 
