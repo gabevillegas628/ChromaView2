@@ -22,6 +22,12 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     velocitySamples: [] // [{velocity, time}, ...]
   });
 
+  // Store enzyme label positions for click detection
+  const enzymeLabelPositionsRef = useRef([]); // [{enzyme, site, pattern, x, y, width, height}, ...]
+
+  // Store ORF positions for click detection
+  const orfPositionsRef = useRef([]); // [{index, startX, endX, yPos, height}, ...]
+
   // Inertia state
   const inertiaState = useRef({
     isActive: false,
@@ -49,6 +55,12 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   const autoScrollRef = useRef({
     isActive: false,
     direction: 0, // -1 for left/up, 1 for right/down
+    rafId: null
+  });
+
+  // Scrollbar drag state
+  const scrollbarDragRef = useRef({
+    isDragging: false,
     rafId: null
   });
 
@@ -86,6 +98,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   // Restriction enzyme mapping
   const [selectedEnzymes, setSelectedEnzymes] = useState([]);
   const [restrictionSites, setRestrictionSites] = useState([]);
+  const [allEnzymeSites, setAllEnzymeSites] = useState([]); // All possible sites for filtering
   const [showRestrictionSites, setShowRestrictionSites] = useState(false);
   const [enzymeSearchQuery, setEnzymeSearchQuery] = useState('');
 
@@ -111,8 +124,27 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   const [selectionRange, setSelectionRange] = useState(null); // {start: number, end: number}
   const selectionRangeRef = useRef(null); // Ref for immediate access during drawing
   const [isDragging, setIsDragging] = useState(false);
+
+  // Enzyme popup state
+  const [enzymePopup, setEnzymePopup] = useState(null); // {enzyme: string, site: string, pattern: string, x: number, y: number}
   const [dragStartPosition, setDragStartPosition] = useState(null);
   const selectionDrawRafId = useRef(null); // RAF ID for throttling selection redraws
+
+  // Detect if device is mobile/touch-enabled
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      // Check for touch support and small screen size
+      const hasTouchScreen = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      const isSmallScreen = window.innerWidth < 1024; // Tablets and below
+      setIsMobile(hasTouchScreen && isSmallScreen);
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Add keyboard shortcuts for editing bases
   useEffect(() => {
@@ -177,6 +209,19 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   const cancelBaseEdit = () => {
     setShowConfirmModal(false);
     setPendingEdit(null);
+  };
+
+  // Function to handle mobile base button clicks
+  const handleMobileBaseEdit = (base) => {
+    if (selectedPosition === null || isEditing || showConfirmModal) return;
+
+    const oldBase = parsedData.baseCalls[selectedPosition];
+    setPendingEdit({
+      position: selectedPosition,
+      oldBase: oldBase,
+      newBase: base
+    });
+    setShowConfirmModal(true);
   };
 
 
@@ -314,6 +359,31 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       return () => cancelAnimationFrame(rafId);
     }
   }, [isResizing, parsedData]);
+
+  // Global mouseup handler for scrollbar dragging
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      if (scrollbarDragRef.current.isDragging) {
+        // Cancel any pending RAF
+        if (scrollbarDragRef.current.rafId !== null) {
+          cancelAnimationFrame(scrollbarDragRef.current.rafId);
+          scrollbarDragRef.current.rafId = null;
+        }
+
+        scrollbarDragRef.current.isDragging = false;
+        setScrollPosition(scrollOffsetRef.current);
+        drawChromatogram();
+      }
+    };
+
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    window.addEventListener('touchend', handleGlobalMouseUp);
+
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+      window.removeEventListener('touchend', handleGlobalMouseUp);
+    };
+  }, []);
 
   // Inertial scrolling animation
   // Stop inertia animation
@@ -1030,10 +1100,11 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
           sites.push({
             enzyme: enzyme.name,
             position: i,
-            cutPosition: i + enzyme.cut,
+            cutPosition: i + enzyme.cut - 0.5, // Position between bases where cut occurs
             site: subseq, // Store the actual matched sequence
             pattern: site, // Store the pattern
-            type: enzyme.type
+            type: enzyme.type,
+            cut: enzyme.cut // Store the cut position within the recognition site
           });
         }
       }
@@ -1044,18 +1115,26 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     return sites;
   }, []);
 
-  // Effect to search for restriction sites when sequence or selected enzymes change
+  // Effect to calculate ALL enzyme sites when sequence changes (for filtering and counts)
   useEffect(() => {
-    if (parsedData && parsedData.sequence && selectedEnzymes.length > 0) {
-      const enzymes = restrictionEnzymes.filter(e => selectedEnzymes.includes(e.name));
-      // Use the currently displayed sequence (forward or reverse complement)
+    if (parsedData && parsedData.sequence) {
       const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
-      const sites = findRestrictionSites(displayData.sequence, enzymes);
+      const allSites = findRestrictionSites(displayData.sequence, restrictionEnzymes);
+      setAllEnzymeSites(allSites);
+    } else {
+      setAllEnzymeSites([]);
+    }
+  }, [parsedData, findRestrictionSites, showReverseComplement]);
+
+  // Effect to filter sites by selected enzymes
+  useEffect(() => {
+    if (selectedEnzymes.length > 0 && allEnzymeSites.length > 0) {
+      const sites = allEnzymeSites.filter(site => selectedEnzymes.includes(site.enzyme));
       setRestrictionSites(sites);
     } else {
       setRestrictionSites([]);
     }
-  }, [parsedData, selectedEnzymes, findRestrictionSites, showReverseComplement]);
+  }, [selectedEnzymes, allEnzymeSites]);
 
   const parseChromatogramFile = async (data) => {
     try {
@@ -1541,6 +1620,16 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   const renderToOffscreenCanvas = useCallback(() => {
     if (!parsedData || layoutMode !== 'horizontal') return;
 
+    // CRITICAL: Don't regenerate offscreen canvas during active interactions
+    // This prevents rendering glitches during inertial scrolling
+    const isActivelyInteracting = selectionTouchRef.current.isSelecting ||
+                                   touchState.current.isActive ||
+                                   inertiaState.current.isActive ||
+                                   scrollbarDragRef.current.isDragging;
+    if (isActivelyInteracting) {
+      return;
+    }
+
     const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
     const { traces, quality, baseCalls, peakLocations } = displayData;
 
@@ -1747,9 +1836,20 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     // Draw RE sites (these don't change during scrolling)
     if (showRestrictionSites && restrictionSites.length > 0) {
       restrictionSites.forEach(site => {
-        const peakPos = peakLocations && peakLocations[site.position]
-          ? peakLocations[site.position]
-          : (site.position * maxTraceLength / baseCalls.length);
+        // Interpolate between adjacent bases for fractional cut positions
+        const baseIndex = Math.floor(site.cutPosition);
+        const nextIndex = Math.ceil(site.cutPosition);
+
+        let peakPos;
+        if (peakLocations && peakLocations[baseIndex] !== undefined && peakLocations[nextIndex] !== undefined) {
+          // Interpolate between the two peak positions
+          const peak1 = peakLocations[baseIndex];
+          const peak2 = peakLocations[nextIndex];
+          peakPos = (peak1 + peak2) / 2;
+        } else {
+          // Fallback calculation
+          peakPos = site.cutPosition * maxTraceLength / baseCalls.length;
+        }
         const x = peakPos * zoomLevel;
 
         offCtx.strokeStyle = '#9333EA';
@@ -1780,6 +1880,15 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       offscreenCanvasRef.current = null;
     }
   }, [parsedData, zoomLevel, showChannels, showReverseComplement, layoutMode, showORFs, detectedORFs, showRestrictionSites, restrictionSites, renderToOffscreenCanvas]);
+
+  // Force redraw when showORFs toggles
+  useEffect(() => {
+    if (parsedData) {
+      requestAnimationFrame(() => {
+        drawChromatogram();
+      });
+    }
+  }, [showORFs]);
 
   // Force a clean redraw when layout mode changes (important for mobile)
   useEffect(() => {
@@ -1859,11 +1968,14 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     }
 
     // Set canvas size dynamically based on container
-    // CRITICAL: Do NOT resize canvas during drag/selection! This causes flickering and broken rendering
-    // Only resize when dimensions actually changed AND we're not actively selecting
-    const isActivelySelecting = selectionTouchRef.current.isSelecting || touchState.current.isActive;
+    // CRITICAL: Do NOT resize canvas during drag/selection/scrolling! This causes flickering and broken rendering
+    // Only resize when dimensions actually changed AND we're not actively interacting
+    const isActivelyInteracting = selectionTouchRef.current.isSelecting ||
+                                   touchState.current.isActive ||
+                                   inertiaState.current.isActive ||
+                                   scrollbarDragRef.current.isDragging;
 
-    if (!isActivelySelecting) {
+    if (!isActivelyInteracting) {
       const container = canvas.parentElement;
       if (container) {
         // Force layout recalculation (important for mobile WebView)
@@ -1936,6 +2048,92 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     const needsRegeneration = !offscreenCanvasRef.current ||
                               offscreenCanvasRef.current.width === 0 ||
                               offscreenCanvasRef.current.height !== canvas.height;
+
+    // Calculate enzyme label positions for click detection (horizontal mode)
+    // Must be done BEFORE early returns so it's always updated during scrolling
+    enzymeLabelPositionsRef.current = [];
+    if (showRestrictionSites && restrictionSites.length > 0) {
+      // Set font for text measurement
+      ctx.font = 'bold 14px "Courier New", monospace';
+
+      restrictionSites.forEach(site => {
+        // Interpolate between adjacent bases for fractional cut positions
+        const baseIndex = Math.floor(site.cutPosition);
+        const nextIndex = Math.ceil(site.cutPosition);
+
+        let peakPos;
+        if (peakLocations && peakLocations[baseIndex] !== undefined && peakLocations[nextIndex] !== undefined) {
+          // Interpolate between the two peak positions
+          const peak1 = peakLocations[baseIndex];
+          const peak2 = peakLocations[nextIndex];
+          peakPos = (peak1 + peak2) / 2;
+        } else {
+          // Fallback calculation
+          peakPos = site.cutPosition * maxTraceLength / baseCalls.length;
+        }
+
+        // Check if this enzyme is in the visible range
+        if (peakPos >= startIndex && peakPos <= endIndex) {
+          // Convert from offscreen canvas position to visible canvas position
+          const offscreenX = peakPos * zoomLevel;
+          const sourceX = startIndex * zoomLevel;
+          const visibleX = offscreenX - sourceX + 4; // +4 for text offset
+          const y = 42;
+          const textWidth = ctx.measureText(site.enzyme).width;
+          const textHeight = 14; // Font size
+
+          enzymeLabelPositionsRef.current.push({
+            enzyme: site.enzyme,
+            site: site.site,
+            pattern: site.pattern,
+            type: site.type,
+            cut: site.cut,
+            position: site.position, // Start position of recognition site
+            x: visibleX,
+            y: y - textHeight, // Adjust y to top-left corner (baseline to top)
+            width: textWidth,
+            height: textHeight
+          });
+        }
+      });
+    }
+
+    // Calculate ORF positions for click detection (horizontal mode)
+    orfPositionsRef.current = [];
+    if (showORFs && detectedORFs.length > 0) {
+      const orfHeight = 14;
+      const orfYOffset = 35;
+
+      detectedORFs.forEach((orf, idx) => {
+        const startPeakPosition = peakLocations && peakLocations[orf.start]
+          ? peakLocations[orf.start]
+          : (orf.start * maxTraceLength / baseCalls.length);
+        const endPeakPosition = peakLocations && peakLocations[orf.end]
+          ? peakLocations[orf.end]
+          : (orf.end * maxTraceLength / baseCalls.length);
+
+        // Check if ORF is in the visible range
+        if (endPeakPosition >= startIndex && startPeakPosition <= endIndex) {
+          // Convert from offscreen canvas position to visible canvas position
+          const offscreenStartX = startPeakPosition * zoomLevel;
+          const offscreenEndX = endPeakPosition * zoomLevel;
+          const sourceX = startIndex * zoomLevel;
+          const visibleStartX = offscreenStartX - sourceX;
+          const visibleEndX = offscreenEndX - sourceX;
+
+          const frameIndex = ['+1', '+2', '+3', '-1', '-2', '-3'].indexOf(orf.frame);
+          const yPos = orfYOffset + (frameIndex * (orfHeight + 2));
+
+          orfPositionsRef.current.push({
+            index: idx,
+            startX: visibleStartX,
+            endX: visibleEndX,
+            yPos,
+            height: orfHeight
+          });
+        }
+      });
+    }
 
     // If we have a pre-rendered offscreen canvas with matching dimensions, just copy the visible portion
     if (!needsRegeneration && offscreenCanvasRef.current) {
@@ -2242,53 +2440,125 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       }
     }
 
-    // Draw search match highlights
-    if (searchMatches.length > 0 && currentMatchIndex >= 0 && currentMatchIndex < searchMatches.length) {
-      const match = searchMatches[currentMatchIndex];
-      const startPeakPosition = peakLocations && peakLocations[match.start]
-        ? peakLocations[match.start]
-        : (match.start * maxTraceLength / baseCalls.length);
-      const endPeakPosition = peakLocations && peakLocations[match.end]
-        ? peakLocations[match.end]
-        : (match.end * maxTraceLength / baseCalls.length);
+    // Draw N base highlights
+    baseCalls.forEach((base, index) => {
+      if (base === 'N') {
+        const peakPosition = peakLocations && peakLocations[index]
+          ? peakLocations[index]
+          : (index * maxTraceLength / baseCalls.length);
 
-      if (endPeakPosition >= startIndex && startPeakPosition <= endIndex) {
-        const startX = Math.max(0, traceToScreenX(startPeakPosition));
-        const endX = Math.min(canvas.width, traceToScreenX(endPeakPosition));
+        if (peakPosition >= startIndex && peakPosition <= endIndex) {
+          const x = traceToScreenX(peakPosition);
+          if (x >= -12 && x <= canvas.width + 12) {
+            // Red highlight for N bases
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+            ctx.fillRect(x - 12, 5, 24, baseCallHeight - 5);
+            ctx.strokeStyle = '#FF0000';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x - 12, 5, 24, baseCallHeight - 5);
 
-        ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
-        ctx.fillRect(startX - 12, 5, (endX - startX) + 24, baselineY + 20 - 5);
-        ctx.strokeStyle = '#FFAA00';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(startX - 12, 5, (endX - startX) + 24, baselineY + 20 - 5);
-
-        // Redraw base letters in the search match region
-        const colors = {
-          A: '#00AA00',
-          T: '#FF0000',
-          G: '#000000',
-          C: '#0000FF'
-        };
-        ctx.font = 'bold 18px monospace';
-        ctx.textAlign = 'center';
-
-        for (let i = match.start; i <= match.end && i < baseCalls.length; i++) {
-          const peakPos = peakLocations && peakLocations[i] !== undefined
-            ? peakLocations[i]
-            : (i * maxTraceLength / baseCalls.length);
-
-          if (peakPos >= startIndex && peakPos <= endIndex) {
-            const x = traceToScreenX(peakPos);
-            ctx.fillStyle = colors[baseCalls[i]] || '#000000';
-            ctx.fillText(baseCalls[i], x, 20);
+            // Redraw the N letter on top
+            ctx.font = 'bold 18px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#666666';
+            ctx.fillText('N', x, 20);
           }
         }
       }
+    });
+
+    // Draw edited position highlights
+    editedPositions.forEach((position) => {
+      const peakPosition = peakLocations && peakLocations[position]
+        ? peakLocations[position]
+        : (position * maxTraceLength / baseCalls.length);
+
+      if (peakPosition >= startIndex && peakPosition <= endIndex) {
+        const x = traceToScreenX(peakPosition);
+        if (x >= -12 && x <= canvas.width + 12) {
+          // Purple highlight for edited bases
+          ctx.fillStyle = 'rgba(128, 0, 255, 0.3)';
+          ctx.fillRect(x - 12, 5, 24, baseCallHeight - 5);
+          ctx.strokeStyle = '#8000FF';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x - 12, 5, 24, baseCallHeight - 5);
+
+          // Redraw the base letter on top
+          const base = baseCalls[position];
+          const colors = {
+            A: '#00AA00',
+            T: '#FF0000',
+            G: '#000000',
+            C: '#0000FF'
+          };
+          ctx.font = 'bold 18px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = colors[base] || '#666666';
+          ctx.fillText(base, x, 20);
+        }
+      }
+    });
+
+    // Draw search match highlights - draw ALL matches
+    if (searchMatches.length > 0) {
+      searchMatches.forEach((match, idx) => {
+        const startPos = match.position;
+        const endPos = match.endPosition;
+
+        const startPeakPosition = peakLocations && peakLocations[startPos]
+          ? peakLocations[startPos]
+          : (startPos * maxTraceLength / baseCalls.length);
+        const endPeakPosition = peakLocations && peakLocations[endPos]
+          ? peakLocations[endPos]
+          : (endPos * maxTraceLength / baseCalls.length);
+
+        if (endPeakPosition >= startIndex && startPeakPosition <= endIndex) {
+          const startX = Math.max(0, traceToScreenX(startPeakPosition));
+          const endX = Math.min(canvas.width, traceToScreenX(endPeakPosition));
+
+          // Different colors for current match vs other matches
+          const isCurrentMatch = idx === currentMatchIndex;
+          ctx.fillStyle = isCurrentMatch ? 'rgba(0, 255, 0, 0.3)' : 'rgba(135, 206, 250, 0.25)';
+          ctx.fillRect(startX - 12, 5, (endX - startX) + 24, baselineY + 20 - 5);
+
+          // Draw border for current match only
+          if (isCurrentMatch) {
+            ctx.strokeStyle = '#00AA00';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(startX - 12, 5, (endX - startX) + 24, baselineY + 20 - 5);
+          }
+
+          // Redraw base letters in the search match region
+          const colors = {
+            A: '#00AA00',
+            T: '#FF0000',
+            G: '#000000',
+            C: '#0000FF'
+          };
+          ctx.font = 'bold 18px monospace';
+          ctx.textAlign = 'center';
+
+          for (let i = startPos; i <= endPos && i < baseCalls.length; i++) {
+            const peakPos = peakLocations && peakLocations[i] !== undefined
+              ? peakLocations[i]
+              : (i * maxTraceLength / baseCalls.length);
+
+            if (peakPos >= startIndex && peakPos <= endIndex) {
+              const x = traceToScreenX(peakPos);
+              ctx.fillStyle = colors[baseCalls[i]] || '#000000';
+              ctx.fillText(baseCalls[i], x, 20);
+            }
+          }
+        }
+      });
     }
   };
 
   const drawWrappedLayout = (ctx, traces, quality, baseCalls, maxTraceLength, peakLocations) => {
     const canvas = canvasRef.current;
+
+    // Clear enzyme label positions for click detection
+    enzymeLabelPositionsRef.current = [];
 
     // Calculate trace points per row based on canvas width and zoom
     const tracePointsPerRow = Math.floor(canvas.width / zoomLevel);
@@ -2379,6 +2649,11 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
         const orfHeight = 14;
         const orfYOffset = 35;
 
+        // Clear ORF positions for click detection (only on first row)
+        if (row === 0) {
+          orfPositionsRef.current = [];
+        }
+
         detectedORFs.forEach((orf, idx) => {
           const startPos = orf.start;
           const endPos = orf.end;
@@ -2416,6 +2691,15 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
             // Calculate Y position based on frame
             const frameIndex = ['+1', '+2', '+3', '-1', '-2', '-3'].indexOf(orf.frame);
             const yPos = rowY + orfYOffset + (frameIndex * (orfHeight + 2));
+
+            // Store ORF position for click detection
+            orfPositionsRef.current.push({
+              index: idx,
+              startX,
+              endX,
+              yPos,
+              height: orfHeight
+            });
 
             // Color based on frame
             const isForward = orf.strand === '+';
@@ -2507,6 +2791,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       // Draw base calls and quality for this row
       ctx.font = 'bold 16px monospace';
       ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic'; // Reset textBaseline (may have been changed by ORF rendering)
 
       for (let i = startBase; i < endBase; i++) {
         const peakPosition = peakLocations && peakLocations[i]
@@ -2560,9 +2845,13 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
       ctx.fillStyle = '#666666';
       ctx.font = '24px monospace';
 
-      const positionInterval = zoomLevel > 10 ? 10 : zoomLevel > 5 ? 25 : 50;
+      const positionInterval = 50;
 
-      for (let pos = startBase; pos < endBase; pos += positionInterval) {
+      // Start at the first multiple of 50 (in 1-indexed space) within or after startBase
+      // We want to show 50, 100, 150, etc., which are 0-indexed positions 49, 99, 149, etc.
+      const firstMarker = Math.ceil((startBase + 1) / positionInterval) * positionInterval - 1;
+
+      for (let pos = firstMarker; pos < endBase; pos += positionInterval) {
         const peakPosition = peakLocations && peakLocations[pos]
           ? peakLocations[pos]
           : (pos * maxTraceLength / baseCalls.length);
@@ -2655,12 +2944,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
               ctx.strokeStyle = '#00AA00';
               ctx.lineWidth = 2;
               ctx.setLineDash([]);
-              ctx.beginPath();
-              ctx.moveTo(startX, rowY + 5);
-              ctx.lineTo(startX, baselineY + 20);
-              ctx.moveTo(endX, rowY + 5);
-              ctx.lineTo(endX, baselineY + 20);
-              ctx.stroke();
+              ctx.strokeRect(startX - 12, rowY + 5, endX - startX + 24, baselineY + 20 - (rowY + 5));
             }
           }
         });
@@ -2673,9 +2957,20 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
 
           // Check if this site is in the current row
           if (basePosition >= startBase && basePosition < endBase) {
-            const peakPosition = peakLocations && peakLocations[basePosition]
-              ? peakLocations[basePosition]
-              : (basePosition * maxTraceLength / baseCalls.length);
+            // Interpolate between adjacent bases for fractional cut positions
+            const baseIndex = Math.floor(basePosition);
+            const nextIndex = Math.ceil(basePosition);
+
+            let peakPosition;
+            if (peakLocations && peakLocations[baseIndex] !== undefined && peakLocations[nextIndex] !== undefined) {
+              // Interpolate between the two peak positions
+              const peak1 = peakLocations[baseIndex];
+              const peak2 = peakLocations[nextIndex];
+              peakPosition = (peak1 + peak2) / 2;
+            } else {
+              // Fallback calculation
+              peakPosition = basePosition * maxTraceLength / baseCalls.length;
+            }
 
             const x = ((peakPosition - startTraceIndex) / (endTraceIndex - startTraceIndex)) * canvas.width;
 
@@ -2696,7 +2991,25 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
               ctx.font = 'bold 16px "Courier New", monospace';
               ctx.textAlign = 'left';
               ctx.textBaseline = 'top';
-              ctx.fillText(site.enzyme, x + 4, rowY + baseCallHeight + 2);
+              const textX = x + 4;
+              const textY = rowY + baseCallHeight + 2;
+              ctx.fillText(site.enzyme, textX, textY);
+
+              // Store label position for click detection
+              const textWidth = ctx.measureText(site.enzyme).width;
+              const textHeight = 16; // Font size
+              enzymeLabelPositionsRef.current.push({
+                enzyme: site.enzyme,
+                site: site.site,
+                pattern: site.pattern,
+                type: site.type,
+                cut: site.cut,
+                position: site.position, // Start position of recognition site
+                x: textX,
+                y: textY,
+                width: textWidth,
+                height: textHeight
+              });
             }
           }
         });
@@ -2765,6 +3078,56 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
     const canvasY = (e.clientY - rect.top) * scaleY;
 
     console.log('Click at canvas X:', canvasX, 'Y:', canvasY);
+
+    // Check if click is on an enzyme label
+    const clickedEnzymeLabel = enzymeLabelPositionsRef.current.find(label =>
+      canvasX >= label.x &&
+      canvasX <= label.x + label.width &&
+      canvasY >= label.y &&
+      canvasY <= label.y + label.height
+    );
+
+    if (clickedEnzymeLabel) {
+      // Show enzyme popup centered on viewport (visible screen area)
+      const centerX = window.innerWidth / 2;
+      const centerY = window.innerHeight / 2;
+
+      setEnzymePopup({
+        enzyme: clickedEnzymeLabel.enzyme,
+        site: clickedEnzymeLabel.site,
+        pattern: clickedEnzymeLabel.pattern,
+        type: clickedEnzymeLabel.type,
+        cut: clickedEnzymeLabel.cut,
+        x: centerX,
+        y: centerY
+      });
+
+      // Highlight the restriction site sequence
+      const siteLength = clickedEnzymeLabel.pattern.length;
+      const newRange = {
+        start: clickedEnzymeLabel.position,
+        end: clickedEnzymeLabel.position + siteLength - 1
+      };
+      selectionRangeRef.current = newRange;
+      setSelectionRange(newRange);
+
+      return;
+    }
+
+    // Check if click is on an ORF
+    const clickedORF = orfPositionsRef.current.find(orf =>
+      canvasX >= orf.startX &&
+      canvasX <= orf.endX &&
+      canvasY >= orf.yPos &&
+      canvasY <= orf.yPos + orf.height
+    );
+
+    if (clickedORF) {
+      // Toggle ORF selection (deselect if already selected)
+      setSelectedORF(selectedORF === clickedORF.index ? null : clickedORF.index);
+      console.log('Clicked ORF:', clickedORF.index);
+      return;
+    }
 
     const traceLengths = Object.values(parsedData.traces).map(trace => trace.length);
     const maxTraceLength = Math.max(...traceLengths);
@@ -3041,12 +3404,41 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   };
 
   const handleScrollbarChange = (e) => {
-    // Stop any ongoing inertia
-    stopInertia();
-
     const newPosition = parseFloat(e.target.value) / 10000;
     scrollOffsetRef.current = newPosition;
-    setScrollPosition(newPosition);
+
+    if (scrollbarDragRef.current.isDragging) {
+      // Cancel any pending RAF
+      if (scrollbarDragRef.current.rafId !== null) {
+        cancelAnimationFrame(scrollbarDragRef.current.rafId);
+      }
+
+      // Schedule update on next frame for smooth 60fps updates
+      scrollbarDragRef.current.rafId = requestAnimationFrame(() => {
+        drawChromatogram();
+        setScrollPosition(scrollOffsetRef.current);
+        scrollbarDragRef.current.rafId = null;
+      });
+    }
+  };
+
+  const handleScrollbarMouseDown = () => {
+    // Stop any ongoing inertia
+    stopInertia();
+    scrollbarDragRef.current.isDragging = true;
+  };
+
+  const handleScrollbarMouseUp = () => {
+    // Cancel any pending RAF
+    if (scrollbarDragRef.current.rafId !== null) {
+      cancelAnimationFrame(scrollbarDragRef.current.rafId);
+      scrollbarDragRef.current.rafId = null;
+    }
+
+    scrollbarDragRef.current.isDragging = false;
+    // Commit final position to state
+    setScrollPosition(scrollOffsetRef.current);
+    drawChromatogram();
   };
 
   const resetView = () => {
@@ -3322,19 +3714,35 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
   };
 
   const exportSequence = () => {
-    if (!parsedData) return;
+    if (!parsedData || !parsedData.baseCalls) return;
 
-    // Export the currently displayed sequence (forward or reverse complement)
-    const displayData = showReverseComplement ? getReverseComplementData(parsedData) : parsedData;
-    const header = showReverseComplement ? `${fileName} (reverse complement)` : fileName;
-    const fasta = `>${header}\n${displayData.sequence}`;
+    // Get the sequence from baseCalls
+    let sequence = parsedData.baseCalls.join('');
+    let header = fileName || 'sequence';
+
+    // If showing reverse complement, reverse and complement the sequence
+    if (showReverseComplement) {
+      sequence = parsedData.baseCalls
+        .slice()
+        .reverse()
+        .map(getComplement)
+        .join('');
+      header = `${header} (reverse complement)`;
+    }
+
+    // Create FASTA format
+    const fasta = `>${header}\n${sequence}\n`;
+
+    // Download the file
     const blob = new Blob([fasta], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const link = document.createElement('a');
+    link.href = url;
     const suffix = showReverseComplement ? '_rc' : '';
-    a.href = url;
-    a.download = `${fileName.replace(/\.(ab1|scf)$/i, '')}${suffix}.fasta`;
-    a.click();
+    link.download = `${fileName.replace(/\.(ab1|scf)$/i, '')}${suffix}.fasta`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
@@ -3602,6 +4010,7 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
                         setSelectedEnzymes(selectedEnzymes.filter(e => e !== enzyme));
                       } else {
                         setSelectedEnzymes([...selectedEnzymes, enzyme]);
+                        setShowRestrictionSites(true);
                       }
                     }}
                     className={`px-2 py-1 text-xs rounded ${
@@ -3616,10 +4025,13 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
               </div>
             </div>
 
-            {/* All enzymes dropdown */}
-            <details className="mb-2">
+            {/* Enzymes with sites found */}
+            <details className="mb-2" open>
               <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-800">
-                All Enzymes ({restrictionEnzymes.length})
+                Enzymes Found ({(() => {
+                  const enzymesWithSites = new Set(allEnzymeSites.map(site => site.enzyme));
+                  return enzymesWithSites.size;
+                })()})
               </summary>
               <div className="mt-2">
                 {/* Search input */}
@@ -3631,32 +4043,48 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
                   className="w-full px-2 py-1 text-xs border border-gray-300 rounded mb-2 focus:outline-none focus:ring-1 focus:ring-purple-500"
                 />
 
-                {/* Enzyme list */}
+                {/* Enzyme list - only show enzymes with sites */}
                 <div className="max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
                   <div className="grid grid-cols-2 gap-1">
-                    {restrictionEnzymes
-                      .filter(enzyme =>
-                        enzyme.name.toLowerCase().includes(enzymeSearchQuery.toLowerCase()) ||
-                        enzyme.site.toLowerCase().includes(enzymeSearchQuery.toLowerCase())
-                      )
-                      .map(enzyme => (
-                        <label key={enzyme.name} className="flex items-center space-x-1 text-xs">
-                          <input
-                            type="checkbox"
-                            checked={selectedEnzymes.includes(enzyme.name)}
-                            onChange={() => {
-                              if (selectedEnzymes.includes(enzyme.name)) {
-                                setSelectedEnzymes(selectedEnzymes.filter(e => e !== enzyme.name));
-                              } else {
-                                setSelectedEnzymes([...selectedEnzymes, enzyme.name]);
-                              }
-                            }}
-                            className="w-3 h-3"
-                          />
-                          <span>{enzyme.name}</span>
-                          <span className="text-gray-400">({enzyme.site})</span>
-                        </label>
-                      ))}
+                    {(() => {
+                      // Get enzymes with sites
+                      const enzymesWithSites = new Map();
+                      allEnzymeSites.forEach(site => {
+                        if (!enzymesWithSites.has(site.enzyme)) {
+                          enzymesWithSites.set(site.enzyme, 0);
+                        }
+                        enzymesWithSites.set(site.enzyme, enzymesWithSites.get(site.enzyme) + 1);
+                      });
+
+                      return restrictionEnzymes
+                        .filter(enzyme =>
+                          enzymesWithSites.has(enzyme.name) &&
+                          (enzyme.name.toLowerCase().includes(enzymeSearchQuery.toLowerCase()) ||
+                           enzyme.site.toLowerCase().includes(enzymeSearchQuery.toLowerCase()))
+                        )
+                        .map(enzyme => {
+                          const siteCount = enzymesWithSites.get(enzyme.name);
+                          return (
+                            <label key={enzyme.name} className="flex items-center space-x-1 text-xs">
+                              <input
+                                type="checkbox"
+                                checked={selectedEnzymes.includes(enzyme.name)}
+                                onChange={() => {
+                                  if (selectedEnzymes.includes(enzyme.name)) {
+                                    setSelectedEnzymes(selectedEnzymes.filter(e => e !== enzyme.name));
+                                  } else {
+                                    setSelectedEnzymes([...selectedEnzymes, enzyme.name]);
+                                    setShowRestrictionSites(true);
+                                  }
+                                }}
+                                className="w-3 h-3"
+                              />
+                              <span>{enzyme.name}</span>
+                              <span className="text-purple-600 font-semibold">({siteCount})</span>
+                            </label>
+                          );
+                        });
+                    })()}
                   </div>
                   {restrictionEnzymes.filter(enzyme =>
                     enzyme.name.toLowerCase().includes(enzymeSearchQuery.toLowerCase()) ||
@@ -4031,11 +4459,15 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
               type="range"
               min="0"
               max="10000"
-              value={((touchState.current.isActive || inertiaState.current.isActive) ? scrollOffsetRef.current : scrollPosition) * 10000}
+              value={((touchState.current.isActive || inertiaState.current.isActive || scrollbarDragRef.current.isDragging) ? scrollOffsetRef.current : scrollPosition) * 10000}
               onChange={handleScrollbarChange}
+              onMouseDown={handleScrollbarMouseDown}
+              onMouseUp={handleScrollbarMouseUp}
+              onTouchStart={handleScrollbarMouseDown}
+              onTouchEnd={handleScrollbarMouseUp}
               className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
               style={{
-                background: `linear-gradient(to right, #0d9488 0%, #0d9488 ${((touchState.current.isActive || inertiaState.current.isActive) ? scrollOffsetRef.current : scrollPosition) * 100}%, #E5E7EB ${((touchState.current.isActive || inertiaState.current.isActive) ? scrollOffsetRef.current : scrollPosition) * 100}%, #E5E7EB 100%)`
+                background: `linear-gradient(to right, #0d9488 0%, #0d9488 ${((touchState.current.isActive || inertiaState.current.isActive || scrollbarDragRef.current.isDragging) ? scrollOffsetRef.current : scrollPosition) * 100}%, #E5E7EB ${((touchState.current.isActive || inertiaState.current.isActive || scrollbarDragRef.current.isDragging) ? scrollOffsetRef.current : scrollPosition) * 100}%, #E5E7EB 100%)`
               }}
             />
             <span className="text-xs text-gray-600 whitespace-nowrap">
@@ -4066,6 +4498,124 @@ const ChromatogramViewer = ({ fileData, fileName, onClose, isResizing = false })
         </div>
         )}
       </div>
+
+      {/* Enzyme popup */}
+      {enzymePopup && (
+        <>
+          {/* Backdrop to close popup on click */}
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setEnzymePopup(null)}
+          />
+          {/* Popup */}
+          <div
+            className="fixed z-50 bg-white border-2 border-purple-600 rounded-lg shadow-lg p-3"
+            style={{
+              left: `${enzymePopup.x}px`,
+              top: `${enzymePopup.y}px`,
+              transform: 'translate(-50%, -50%)'
+            }}
+          >
+            <div className="text-sm">
+              <div className="font-bold text-purple-700 mb-2">{enzymePopup.enzyme}</div>
+              <div className="text-xs text-gray-600 space-y-1">
+                <div><span className="font-semibold">Recognition Site:</span> {enzymePopup.pattern}</div>
+                <div><span className="font-semibold">Type:</span> {enzymePopup.type || 'N/A'}</div>
+
+                {/* Cutting pattern visualization */}
+                <div className="mt-2 pt-2 border-t border-gray-200">
+                  <div className="font-semibold mb-1">Cutting Pattern:</div>
+                  <div className="font-mono text-xs bg-gray-50 p-2 rounded" style={{ letterSpacing: '0.15em' }}>
+                    {/* Top strand with triangle */}
+                    <div>
+                      <span style={{ letterSpacing: 'normal' }}>5'-</span>
+                      {enzymePopup.pattern.substring(0, enzymePopup.cut)}
+                      <sup style={{ fontSize: '0.6em' }}>▼</sup>
+                      {enzymePopup.pattern.substring(enzymePopup.cut)}
+                      <span style={{ letterSpacing: 'normal' }}>-3'</span>
+                    </div>
+                    {/* Bottom strand with triangle */}
+                    <div>
+                      <span style={{ letterSpacing: 'normal' }}>3'-</span>
+                      {(() => {
+                        const complement = enzymePopup.pattern.split('').map(b => {
+                          return {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N', 'R': 'Y', 'Y': 'R', 'W': 'W', 'S': 'S', 'M': 'K', 'K': 'M'}[b] || b;
+                        }).join('');
+                        const cutPos = enzymePopup.pattern.length - enzymePopup.cut;
+                        return (
+                          <>
+                            {complement.substring(0, cutPos)}
+                            <sub style={{ fontSize: '0.6em' }}>▲</sub>
+                            {complement.substring(cutPos)}
+                          </>
+                        );
+                      })()}
+                      <span style={{ letterSpacing: 'normal' }}>-5'</span>
+                    </div>
+                  </div>
+                </div>
+
+                {enzymePopup.site !== enzymePopup.pattern && (
+                  <div className="mt-1 text-[10px] text-gray-500">
+                    Matched: {enzymePopup.site}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Mobile Bottom Action Bar for Base Editing */}
+      {isMobile && selectedPosition !== null && !showConfirmModal && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-300 shadow-lg z-40 safe-area-inset-bottom">
+          <div className="px-2 py-2 flex items-center">
+            <div className="flex-1 flex items-center justify-center gap-2">
+              <div className="text-lg text-gray-700 font-medium whitespace-nowrap">
+                Edit Pos {selectedPosition + 1} ({parsedData.baseCalls[selectedPosition]}):
+              </div>
+              <div className="flex gap-1.5">
+                {['A', 'T', 'G', 'C', 'N'].map((base) => {
+                  const colors = {
+                    A: 'bg-green-600 hover:bg-green-700 active:bg-green-800',
+                    T: 'bg-red-600 hover:bg-red-700 active:bg-red-800',
+                    G: 'bg-black hover:bg-gray-800 active:bg-gray-900',
+                    C: 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800',
+                    N: 'bg-gray-600 hover:bg-gray-700 active:bg-gray-800'
+                  };
+                  const isCurrentBase = parsedData.baseCalls[selectedPosition] === base;
+
+                  return (
+                    <button
+                      key={base}
+                      onClick={() => handleMobileBaseEdit(base)}
+                      disabled={isCurrentBase}
+                      className={`
+                        ${colors[base]}
+                        ${isCurrentBase ? 'opacity-50 cursor-not-allowed' : ''}
+                        text-white font-bold text-base px-4 py-2 rounded
+                        shadow transition-all duration-150
+                        min-w-[44px] touch-manipulation
+                      `}
+                    >
+                      {base}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <button
+              onClick={() => setSelectedPosition(null)}
+              className="text-gray-500 hover:text-gray-700 p-1"
+              aria-label="Close"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
